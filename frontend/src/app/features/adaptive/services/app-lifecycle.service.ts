@@ -70,6 +70,13 @@ export class AppLifecycleService {
     });
   }
 
+  /** Used after Update and restart: show the restarting overlay and poll until the new process is up. */
+  beginRestartWait(): void {
+    this.busy.set(false);
+    this.restarting.set(true);
+    this.waitForServer();
+  }
+
   private post(action: 'quit' | 'restart'): Observable<void> {
     const headers = this.authHeaders();
     if (!headers) return throwError(() => new Error('Please wait for Instaboard to connect.'));

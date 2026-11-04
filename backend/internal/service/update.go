@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,7 +78,8 @@ func NewUpdater(current string) *Updater {
 // Check returns whether a newer release exists.
 // When UPDATE_CHECK=0, skips the network. Dev/empty builds still fetch so the UI can show
 // latest tag + publish date, but never report update_available.
-func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
+// Pass refresh=true to bypass the in-memory cache (manual "Check for updates").
+func (u *Updater) Check(ctx context.Context, refresh bool) (*UpdateInfo, error) {
 	now := time.Now().UTC()
 	skipped := !u.enabled || u.current == "" || u.current == "dev"
 	if !u.enabled {
@@ -92,7 +94,7 @@ func (u *Updater) Check(ctx context.Context) (*UpdateInfo, error) {
 	}
 
 	u.mu.Lock()
-	if u.cache != nil && now.Sub(u.cache.CheckedAt) < updateCacheTTL {
+	if !refresh && u.cache != nil && now.Sub(u.cache.CheckedAt) < updateCacheTTL {
 		out := *u.cache
 		u.mu.Unlock()
 		return &out, nil
@@ -212,7 +214,7 @@ func (u *Updater) fetchLatest(ctx context.Context) (*UpdateInfo, error) {
 
 // Download fetches the latest Mac zip into ~/Downloads and reveals it in Finder on macOS.
 func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
-	info, err := u.Check(ctx)
+	info, err := u.Check(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -233,36 +235,7 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 	}
 	dest := filepath.Join(destDir, u.asset)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, info.DownloadURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Instaboard/"+displayVersion(u.current))
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download update: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download update: HTTP %d", res.StatusCode)
-	}
-
-	tmp := dest + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(f, res.Body); err != nil {
-		f.Close()
-		_ = os.Remove(tmp)
-		return nil, fmt.Errorf("save update: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
+	if err := u.downloadAsset(ctx, info.DownloadURL, dest); err != nil {
 		return nil, err
 	}
 
@@ -270,6 +243,137 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 		_ = exec.Command("open", "-R", dest).Start()
 	}
 	return &UpdateDownloadResult{Path: dest}, nil
+}
+
+// Apply downloads the latest zip into ~/.instaboard/runtime/ (not the double-clicked
+// launcher). Caller should restart the launcher; it then execs into the new runtime
+// without another Gatekeeper Allow prompt.
+func (u *Updater) Apply(ctx context.Context) (*UpdateDownloadResult, error) {
+	info, err := u.Check(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	if info.Skipped {
+		return nil, fmt.Errorf("update and restart is only available in release builds")
+	}
+	if !info.UpdateAvailable || info.DownloadURL == "" {
+		return nil, fmt.Errorf("no update available to apply")
+	}
+
+	self, err := currentExePath()
+	if err != nil {
+		return nil, err
+	}
+	// Remember the user-facing binary so Restart opens that (already Allowed) path.
+	if !sameFilePath(self, RuntimeBinaryPath()) {
+		recordLauncher(self)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "instaboard-update-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	zipPath := filepath.Join(tmpDir, u.asset)
+	if err := u.downloadAsset(ctx, info.DownloadURL, zipPath); err != nil {
+		return nil, err
+	}
+	clearMacDownloadAttrs(zipPath)
+
+	binPath, err := extractNamedFile(zipPath, "Instaboard", tmpDir)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(binPath, 0o755)
+	clearMacDownloadAttrs(binPath)
+
+	if err := PrepareRuntimeBinary(binPath, info.Latest); err != nil {
+		return nil, fmt.Errorf("install update runtime: %w", err)
+	}
+
+	// Keep a zip in Downloads for manual installs.
+	if home, err := os.UserHomeDir(); err == nil {
+		dest := filepath.Join(home, "Downloads", u.asset)
+		_ = copyFile(zipPath, dest)
+	}
+
+	return &UpdateDownloadResult{Path: RuntimeBinaryPath()}, nil
+}
+
+func (u *Updater) downloadAsset(ctx context.Context, url, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Instaboard/"+displayVersion(u.current))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download update: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("download update: HTTP %d", res.StatusCode)
+	}
+
+	tmp := dest + ".partial"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, res.Body); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("save update: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func extractNamedFile(zipPath, wantName, destDir string) (string, error) {
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("open update zip: %w", err)
+	}
+	defer zr.Close()
+
+	var match *zip.File
+	for _, f := range zr.File {
+		base := filepath.Base(f.Name)
+		if base == wantName && !f.FileInfo().IsDir() {
+			match = f
+			break
+		}
+	}
+	if match == nil {
+		return "", fmt.Errorf("update zip is missing %q", wantName)
+	}
+
+	outPath := filepath.Join(destDir, wantName)
+	rc, err := match.Open()
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, rc); err != nil {
+		out.Close()
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	return outPath, nil
 }
 
 func normalizeSemver(v string) string {

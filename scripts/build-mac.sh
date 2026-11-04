@@ -44,6 +44,10 @@ else
   fi
 fi
 chmod +x "$OUT/Instaboard"
+# Ad-hoc sign so Apple Silicon will run the binary; Update-and-restart also re-signs the runtime copy.
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - --timestamp=none "$OUT/Instaboard" 2>/dev/null || true
+fi
 
 echo "==> Zip"
 cat > "$OUT/README.txt" <<EOF

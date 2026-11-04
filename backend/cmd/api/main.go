@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +34,10 @@ import (
 var version = "dev"
 
 func main() {
+	// If Update-and-restart installed a newer copy under ~/.instaboard/runtime/, switch to it.
+	// The double-clicked launcher the user Allowed is left untouched (no Gatekeeper re-prompt).
+	service.MaybeExecRuntime(version)
+
 	// Optional overrides (PORT, DB_PATH, DOWNLOAD_DIR, ...); every setting has a default.
 	_ = godotenv.Load(".env")
 	cfg := config.Load()
@@ -66,8 +69,6 @@ func main() {
 	mediaSigner := service.NewMediaSigner(cfg.JWTSecret, cfg.BackendPublicURL, 24*time.Hour)
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
-	updateHandler := handler.NewUpdateHandler(service.NewUpdater(version))
-
 	embeddedUI := ui.HasUI()
 	if embeddedUI {
 		// Same-origin UI — CORS origin matches the app URL (dev still uses CORS_ORIGIN).
@@ -78,6 +79,11 @@ func main() {
 
 	var srv *http.Server
 	var restartAfter atomic.Bool
+	triggerRestart := func() {
+		restartAfter.Store(true)
+		go gracefulShutdown(srv)
+	}
+	updateHandler := handler.NewUpdateHandler(service.NewUpdater(version), triggerRestart)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -115,6 +121,7 @@ func main() {
 			r.Delete("/downloads/tools", dumpHandler.UninstallDownloadTools)
 			r.Get("/update", updateHandler.Check)
 			r.Post("/update/download", updateHandler.Download)
+			r.Post("/update/apply", updateHandler.Apply)
 			// Quit / Restart from the UI (Quit = Ctrl+C; Restart relaunches this binary after shutdown).
 			r.Post("/quit", func(w http.ResponseWriter, req *http.Request) {
 				utils.WriteSuccess(w, map[string]string{"ok": "true"})
@@ -122,8 +129,7 @@ func main() {
 			})
 			r.Post("/restart", func(w http.ResponseWriter, req *http.Request) {
 				utils.WriteSuccess(w, map[string]string{"ok": "true"})
-				restartAfter.Store(true)
-				go gracefulShutdown(srv)
+				triggerRestart()
 			})
 		})
 	})
@@ -168,13 +174,11 @@ func gracefulShutdown(srv *http.Server) {
 }
 
 // relaunchSelf starts a new Instaboard process (detached) so Restart survives this process exiting.
+// Prefer the original launcher path so macOS does not re-prompt Gatekeeper for the runtime binary.
 func relaunchSelf() error {
-	exe, err := os.Executable()
+	exe, err := service.RelaunchExecutable()
 	if err != nil {
 		return err
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
 	}
 
 	env := os.Environ()

@@ -1,5 +1,5 @@
 /**
- * App update popup (footer chip): current vs latest release, download Instaboard-mac.zip to ~/Downloads.
+ * App update popup (footer chip): check GitHub Releases, download zip, or update-and-restart.
  */
 import { ChangeDetectionStrategy, Component, HostListener, inject, output } from '@angular/core';
 import { DatePipe } from '@angular/common';
@@ -14,14 +14,19 @@ const FALLBACK_RELEASES = 'https://github.com/instaboard2026/instaboard-app/rele
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fixed inset-0 z-[1000] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="update-title">
-      <div class="absolute inset-0 bg-black/60" (click)="close.emit()"></div>
+      <div class="absolute inset-0 bg-black/60" (click)="onBackdrop()"></div>
       <div class="relative w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-sm text-slate-700 dark:text-slate-300 shadow-xl">
         <div class="flex items-start justify-between gap-4">
           <h2 id="update-title" class="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-white">
             <span class="material-icons-outlined">system_update</span>
             App update
           </h2>
-          <button type="button" (click)="close.emit()" aria-label="Close" class="-m-1 p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button
+            type="button"
+            (click)="close.emit()"
+            [disabled]="updates.busy()"
+            aria-label="Close"
+            class="-m-1 p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40">
             <span class="material-icons-outlined">close</span>
           </button>
         </div>
@@ -60,6 +65,32 @@ const FALLBACK_RELEASES = 'https://github.com/instaboard2026/instaboard-app/rele
             }
           </dl>
 
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              (click)="updates.check(true)"
+              [disabled]="updates.busy()"
+              class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60">
+              {{ updates.checking() ? 'Checking…' : 'Check for updates' }}
+            </button>
+            @if (!info.skipped && updates.updateAvailable()) {
+              <button
+                type="button"
+                (click)="updates.applyAndRestart()"
+                [disabled]="updates.busy()"
+                class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-60">
+                {{ updates.applying() ? 'Updating…' : 'Update and restart' }}
+              </button>
+            }
+          </div>
+
+          @if (updates.applying()) {
+            <div class="mt-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-3 py-3 text-blue-900 dark:text-blue-100" role="status">
+              <p class="font-semibold">Downloading and installing {{ info.latest }}…</p>
+              <p class="mt-1 text-[13px] opacity-90">Installing under ~/.instaboard/runtime — no new macOS Allow prompt.</p>
+            </div>
+          }
+
           @if (info.skipped) {
             <div class="mt-4 flex items-start gap-3 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-3">
               <span class="material-icons-outlined !text-xl shrink-0 text-slate-500">info</span>
@@ -80,16 +111,16 @@ const FALLBACK_RELEASES = 'https://github.com/instaboard2026/instaboard-app/rele
               <div class="mt-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 px-3 py-3 text-emerald-800 dark:text-emerald-300 space-y-1">
                 <p class="font-semibold">Saved to Downloads</p>
                 <p class="font-mono text-[12px] break-all opacity-90">{{ path }}</p>
-                <p class="text-[13px] opacity-90">Quit Instaboard, replace the app with the new binary from the zip, then reopen.</p>
+                <p class="text-[13px] opacity-90">Or use <strong>Update and restart</strong> to apply automatically.</p>
               </div>
-            } @else {
-              <div class="mt-4">
+            } @else if (!updates.applying()) {
+              <div class="mt-3">
                 <button
                   type="button"
                   (click)="updates.download()"
-                  [disabled]="updates.downloading()"
-                  class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-60">
-                  {{ updates.downloading() ? 'Downloading…' : 'Download update' }}
+                  [disabled]="updates.busy()"
+                  class="text-[13px] font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-60">
+                  {{ updates.downloading() ? 'Downloading zip…' : 'Download zip only' }}
                 </button>
               </div>
             }
@@ -122,8 +153,12 @@ export class UpdateSettingsModalComponent {
     this.updates.check();
   }
 
+  onBackdrop(): void {
+    if (!this.updates.busy()) this.close.emit();
+  }
+
   @HostListener('document:keydown.escape')
   onEscape(): void {
-    this.close.emit();
+    if (!this.updates.busy()) this.close.emit();
   }
 }
