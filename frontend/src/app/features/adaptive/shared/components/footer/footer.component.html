@@ -1,5 +1,27 @@
 <footer class="w-full max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-6 xl:px-6 2xl:px-8 py-6 sm:py-8 lg:py-6 xl:py-5 2xl:py-8 flex flex-wrap justify-between items-center gap-x-4 gap-y-3 border-t border-[#ebebeb] dark:border-slate-800 bg-white dark:bg-primary-bg">
-  <div class="font-display font-bold text-lg sm:text-xl lg:text-lg xl:text-base 2xl:text-xl text-gray-700 dark:text-slate-300">Instaboard</div>
+  <div class="flex items-center gap-2 min-w-0">
+    <div class="font-display font-bold text-lg sm:text-xl lg:text-lg xl:text-base 2xl:text-xl text-gray-700 dark:text-slate-300">Instaboard</div>
+    @if (isLoggedIn()) {
+      <button
+        type="button"
+        (click)="lifecycle.restart()"
+        [disabled]="lifecycle.busy()"
+        title="Restart Instaboard"
+        class="inline-flex items-center gap-1 rounded-full border border-gray-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50">
+        <span class="material-icons-outlined !text-base">restart_alt</span>
+        Restart
+      </button>
+      <button
+        type="button"
+        (click)="lifecycle.quit()"
+        [disabled]="lifecycle.busy()"
+        title="Quit Instaboard (same as Ctrl+C)"
+        class="inline-flex items-center gap-1 rounded-full border border-gray-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-red-50 hover:text-red-700 hover:border-red-200 dark:hover:bg-red-950/40 dark:hover:text-red-300 dark:hover:border-red-900 transition-colors disabled:opacity-50">
+        <span class="material-icons-outlined !text-base">power_settings_new</span>
+        Quit
+      </button>
+    }
+  </div>
   <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
     @if (isLoggedIn()) {
       <button
@@ -12,6 +34,34 @@
         @if (downloads.needsAttention()) {
           <span class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500" aria-label="Needs attention"></span>
         }
+      </button>
+      <button
+        type="button"
+        (click)="updateOpen.set(true)"
+        [title]="updates.updateAvailable()
+          ? ('Instaboard ' + (updates.info()?.latest ?? '') + ' is available')
+          : ('Installed: ' + (updates.info()?.current ?? '…'))"
+        class="relative inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
+        <span class="material-icons-outlined !text-base">
+          {{ updates.updateAvailable() ? 'system_update' : 'verified' }}
+        </span>
+        {{ updates.chipLabel() }}
+        @if (updates.updateAvailable()) {
+          <span class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500" aria-label="Update available"></span>
+        }
+      </button>
+      <button
+        type="button"
+        (click)="toolsOpen.set(true)"
+        [disabled]="downloads.toolsBusy()"
+        [title]="downloads.toolsMissing() ? 'Install gallery-dl, yt-dlp and ffmpeg on this Mac' : 'Download tools are installed'"
+        [class]="downloads.toolsMissing()
+          ? 'inline-flex items-center gap-1.5 rounded-full border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-60'
+          : 'inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-60'">
+        <span class="material-icons-outlined !text-base">
+          {{ downloads.toolsBusy() ? 'hourglass_top' : (downloads.toolsMissing() ? 'download' : 'check_circle') }}
+        </span>
+        {{ downloads.installing() ? 'Installing…' : (downloads.uninstalling() ? 'Uninstalling…' : (downloads.toolsMissing() ? 'Install tools' : 'Tools ready')) }}
       </button>
     }
     <button
@@ -29,4 +79,10 @@
 
 @if (downloadsOpen()) {
   <app-download-settings-modal (close)="downloadsOpen.set(false)" />
+}
+@if (updateOpen()) {
+  <app-update-settings-modal (close)="updateOpen.set(false)" />
+}
+@if (toolsOpen()) {
+  <app-tools-settings-modal (close)="toolsOpen.set(false)" />
 }

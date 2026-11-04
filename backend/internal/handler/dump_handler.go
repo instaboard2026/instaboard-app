@@ -253,6 +253,42 @@ func (h *DumpHandler) DownloadsInfo(w http.ResponseWriter, r *http.Request) {
 	utils.WriteSuccess(w, h.info(r, userID))
 }
 
+// InstallDownloadTools installs (or reinstalls) gallery-dl, yt-dlp and ffmpeg for this Mac.
+func (h *DumpHandler) InstallDownloadTools(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	if err := service.InstallDownloadTools(r.Context()); err != nil {
+		slog.Error("install download tools failed", "user_id", userID, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+	h.downloader.RefreshTools()
+	if !h.downloader.Available() {
+		utils.WriteError(w, http.StatusInternalServerError, "tools installed but still not found — try quitting Instaboard and opening it again", nil)
+		return
+	}
+	utils.WriteSuccess(w, h.info(r, userID))
+}
+
+// UninstallDownloadTools removes managed tools and turns downloads off until the user installs again.
+func (h *DumpHandler) UninstallDownloadTools(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	if err := service.UninstallDownloadTools(); err != nil {
+		slog.Error("uninstall download tools failed", "user_id", userID, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+	h.downloader.RefreshTools()
+	utils.WriteSuccess(w, h.info(r, userID))
+}
+
 // ChooseDownloadFolder opens the native folder picker on this computer and saves the chosen folder.
 // The request waits until the user picks or cancels.
 func (h *DumpHandler) ChooseDownloadFolder(w http.ResponseWriter, r *http.Request) {

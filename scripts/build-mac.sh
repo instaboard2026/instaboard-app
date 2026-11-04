@@ -51,7 +51,7 @@ Instaboard ${VERSION}
 
 1. Double-click Instaboard (or run it from Terminal: ./Instaboard).
 2. Your browser opens to http://127.0.0.1:8788 — keep the Instaboard window open while you use it.
-3. Quit with Ctrl+C in that window, or close the Terminal tab.
+3. Use Restart / Quit beside the Instaboard name in the footer, or press Ctrl+C in that window.
 
 First launch on macOS: if Gatekeeper blocks it, right-click Instaboard → Open → Open.
 You need gallery-dl, yt-dlp, and ffmpeg on your PATH (brew install gallery-dl yt-dlp ffmpeg).

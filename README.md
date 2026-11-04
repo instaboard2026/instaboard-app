@@ -12,11 +12,7 @@ stored on your machine; there is no account or cloud.
 
 First launch: if macOS blocks the unsigned binary, right-click → Open → Open.
 
-Also install download tools once:
-
-```sh
-brew install gallery-dl yt-dlp ffmpeg
-```
+**Download tools:** if gallery-dl / yt-dlp / ffmpeg aren’t on your Mac yet, open Instaboard and click **Install tools** in the footer (or in Downloads). No restart needed. Homebrew is used when available.
 
 For Instagram, stay logged in to Instagram in Chrome (macOS may ask once for Keychain access).
 
@@ -48,3 +44,16 @@ Open http://localhost:5281.
 ./scripts/build-mac.sh
 # → dist/Instaboard-mac.zip
 ```
+
+## Ship an update
+
+The footer **Updates** chip shows when you’re behind; open it and **Download update** saves `Instaboard-mac.zip` to `~/Downloads`.
+
+```sh
+git tag v0.1.1
+VERSION=v0.1.1 ./scripts/build-mac.sh
+gh release create v0.1.1 dist/Instaboard-mac.zip --repo instaboard2026/instaboard-app \
+  --title "Instaboard v0.1.1" --notes "What changed…"
+```
+
+The release asset **must** be named `Instaboard-mac.zip` so the updater finds it. Set `UPDATE_CHECK=0` to disable checks.

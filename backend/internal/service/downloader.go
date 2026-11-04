@@ -23,7 +23,7 @@ const (
 const downloadTimeout = 3 * time.Minute
 
 var (
-	ErrToolMissing     = errors.New("gallery-dl is not installed. Run: brew install gallery-dl yt-dlp ffmpeg")
+	ErrToolMissing     = errors.New("download tools aren't installed. Open Downloads in the footer and click Install")
 	ErrLoginRequired   = errors.New("Instagram asked for a login. Log into instagram.com in Chrome on this computer, then try again")
 	ErrRateLimited     = errors.New("Instagram is limiting requests right now. Wait a few minutes and try again")
 	ErrPostNotFound    = errors.New("this post wasn't found. It may be deleted or private")
@@ -64,8 +64,8 @@ func NewDownloader(bin, cookiesBrowser, ytdlModule string) *Downloader {
 // gallery-dl and yt-dlp in separate Python environments, so gallery-dl can't import yt_dlp on its own
 // and would fail on Instagram's high-quality (DASH) videos.
 func detectYTDLModule() string {
-	exe, err := exec.LookPath("yt-dlp")
-	if err != nil {
+	exe := toolPath("yt-dlp")
+	if exe == "" {
 		return ""
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
@@ -96,10 +96,38 @@ func detectYTDLModule() string {
 	return strings.TrimSpace(string(out))
 }
 
-// Available reports whether the gallery-dl binary can be found.
+// galleryDL returns the gallery-dl binary to run (managed ~/.instaboard/bin first, then PATH / config).
+func (d *Downloader) galleryDL() string {
+	// Explicit path from config/tests: use it only (don't fall back to a system install).
+	if d.bin != "" && d.bin != "gallery-dl" && (filepath.IsAbs(d.bin) || strings.Contains(d.bin, string(os.PathSeparator))) {
+		if fi, err := os.Stat(d.bin); err == nil && !fi.IsDir() {
+			return d.bin
+		}
+		return ""
+	}
+	// In-app Uninstall sets tools-disabled so downloads stay off until Install, even if brew tools exist on PATH.
+	if ToolsDisabled() {
+		return ""
+	}
+	if p := toolPath("gallery-dl"); p != "" {
+		return p
+	}
+	if d.bin != "" {
+		if p, err := exec.LookPath(d.bin); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// Available reports whether gallery-dl can be found (managed install or on PATH).
 func (d *Downloader) Available() bool {
-	_, err := exec.LookPath(d.bin)
-	return err == nil
+	return d.galleryDL() != ""
+}
+
+// RefreshTools re-detects yt-dlp after an in-app install so downloads work without restarting.
+func (d *Downloader) RefreshTools() {
+	d.ytdlModule = detectYTDLModule()
 }
 
 // Status returns what's downloaded for a save in dir, or nil if nothing is.
@@ -186,8 +214,13 @@ func (d *Downloader) Download(ctx context.Context, dir string, id uint64, url st
 	}
 	args = append(args, "--", url)
 
+	bin := d.galleryDL()
+	if bin == "" {
+		return nil, ErrToolMissing
+	}
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, d.bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(os.Environ(), "PATH="+pathWithManagedBin())
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {

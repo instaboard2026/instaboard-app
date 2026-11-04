@@ -14,6 +14,8 @@ import { AccountMenuModalContainerComponent } from './app/features/adaptive/shar
 import { ConfirmDialogComponent } from './app/features/adaptive/shared/components/confirm-dialog/confirm-dialog.component';
 import { UserContextService } from './app/features/adaptive/services/user-context.service';
 import { LocalSessionService } from './app/features/adaptive/services/local-session.service';
+import { UpdateService } from './app/features/adaptive/services/update.service';
+import { AppLifecycleService } from './app/features/adaptive/services/app-lifecycle.service';
 
 const SIDEBAR_STATE_KEY = 'sidebar_open';
 /** Below this width the navigation is an icon rail that opens as a drawer over the page. */
@@ -44,6 +46,8 @@ export class AppComponent implements OnInit {
   layoutControlService = inject(LayoutControlService);
   userContext = inject(UserContextService);
   private session = inject(LocalSessionService);
+  private updates = inject(UpdateService);
+  readonly lifecycle = inject(AppLifecycleService);
 
   readonly appScrollId = APP_SCROLL_ID;
   isShellVisible = this.layoutControlService.isShellVisible;
@@ -79,6 +83,10 @@ export class AppComponent implements OnInit {
       } else {
         document.documentElement.classList.remove('dark');
       }
+    });
+    // Check for a newer GitHub Release once the local session is ready.
+    effect(() => {
+      if (this.session.status() === 'ready') this.updates.check();
     });
     // The panel keeps its scroll position across routes, so start each page at the top.
     inject(Router).events

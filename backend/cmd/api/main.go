@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +28,7 @@ import (
 	"instaboard/internal/service"
 	"instaboard/internal/ui"
 	"instaboard/migrations"
+	"instaboard/pkg/utils"
 )
 
 // Set at link time by scripts/build-mac.sh (-X main.version=...).
@@ -62,6 +66,7 @@ func main() {
 	mediaSigner := service.NewMediaSigner(cfg.JWTSecret, cfg.BackendPublicURL, 24*time.Hour)
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
+	updateHandler := handler.NewUpdateHandler(service.NewUpdater(version))
 
 	embeddedUI := ui.HasUI()
 	if embeddedUI {
@@ -70,6 +75,9 @@ func main() {
 			cfg.CORSHost = cfg.BackendPublicURL
 		}
 	}
+
+	var srv *http.Server
+	var restartAfter atomic.Bool
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -103,6 +111,20 @@ func main() {
 			r.Get("/downloads/info", dumpHandler.DownloadsInfo)
 			r.Post("/downloads/folder", dumpHandler.ChooseDownloadFolder)
 			r.Delete("/downloads/folder", dumpHandler.ResetDownloadFolder)
+			r.Post("/downloads/tools", dumpHandler.InstallDownloadTools)
+			r.Delete("/downloads/tools", dumpHandler.UninstallDownloadTools)
+			r.Get("/update", updateHandler.Check)
+			r.Post("/update/download", updateHandler.Download)
+			// Quit / Restart from the UI (Quit = Ctrl+C; Restart relaunches this binary after shutdown).
+			r.Post("/quit", func(w http.ResponseWriter, req *http.Request) {
+				utils.WriteSuccess(w, map[string]string{"ok": "true"})
+				go gracefulShutdown(srv)
+			})
+			r.Post("/restart", func(w http.ResponseWriter, req *http.Request) {
+				utils.WriteSuccess(w, map[string]string{"ok": "true"})
+				restartAfter.Store(true)
+				go gracefulShutdown(srv)
+			})
 		})
 	})
 
@@ -112,8 +134,9 @@ func main() {
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	url := fmt.Sprintf("http://%s", addr)
+	srv = &http.Server{Addr: addr, Handler: r}
 	if embeddedUI {
-		fmt.Fprintf(os.Stderr, "\n  Instaboard is running at %s\n  Keep this window open. Press Ctrl+C to quit.\n\n", url)
+		fmt.Fprintf(os.Stderr, "\n  Instaboard is running at %s\n  Keep this window open. Use Restart/Quit in the app, or press Ctrl+C.\n\n", url)
 	}
 	slog.Info("server starting", "addr", addr, "ui", embeddedUI)
 
@@ -121,10 +144,62 @@ func main() {
 		go openBrowser(url)
 	}
 
-	if err := http.ListenAndServe(addr, r); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("server stopped")
+
+	if restartAfter.Load() {
+		if err := relaunchSelf(); err != nil {
+			slog.Error("restart failed", "err", err)
+			os.Exit(1)
+		}
+	}
+}
+
+func gracefulShutdown(srv *http.Server) {
+	time.Sleep(150 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Warn("shutdown", "err", err)
+	}
+}
+
+// relaunchSelf starts a new Instaboard process (detached) so Restart survives this process exiting.
+func relaunchSelf() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+
+	env := os.Environ()
+	// Prefer opening the browser for the new instance (UI Restart).
+	filtered := make([]string, 0, len(env)+1)
+	for _, e := range env {
+		if strings.HasPrefix(e, "OPEN_BROWSER=") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	filtered = append(filtered, "OPEN_BROWSER=1")
+
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Env = filtered
+	cmd.Dir, _ = os.Getwd()
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	slog.Info("restarted", "pid", cmd.Process.Pid, "exe", exe)
+	_ = cmd.Process.Release()
+	return nil
 }
 
 func shouldOpenBrowser(embeddedUI bool) bool {

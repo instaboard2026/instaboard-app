@@ -200,6 +200,38 @@ export class DumpService {
     return this.folderRequest('DELETE');
   }
 
+  /** Installs or reinstalls gallery-dl, yt-dlp and ffmpeg on this Mac (may take a few minutes). */
+  installDownloadTools(): Observable<DownloadsInfo> {
+    return this.toolsRequest('POST', 'Could not install download tools.');
+  }
+
+  /** Uninstalls tools from Instaboard (downloads stay off until you install again). */
+  uninstallDownloadTools(): Observable<DownloadsInfo> {
+    return this.toolsRequest('DELETE', 'Could not uninstall download tools.');
+  }
+
+  private toolsRequest(method: 'POST' | 'DELETE', fallback: string): Observable<DownloadsInfo> {
+    const headers = this.authHeaders();
+    if (!headers) {
+      return throwError(() => new Error('Please sign in.'));
+    }
+    return this.http
+      .request<ApiWrapper<DownloadsInfo>>(method, `${environment.apiUrl}/api/downloads/tools`, { headers })
+      .pipe(
+        map((res) => {
+          if (res?.status !== 'SUCCESS' || !res.data) {
+            throw new Error(res?.message || fallback);
+          }
+          return res.data;
+        }),
+        catchError((err: unknown) => {
+          const message =
+            err instanceof HttpErrorResponse ? err.error?.message || fallback : (err as Error)?.message || fallback;
+          return throwError(() => new Error(message));
+        }),
+      );
+  }
+
   private folderRequest(method: 'POST' | 'DELETE'): Observable<DownloadsInfo> {
     const headers = this.authHeaders();
     if (!headers) {

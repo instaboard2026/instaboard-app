@@ -55,12 +55,6 @@ import { DownloadSettingsService } from '../../../services/download-settings.ser
               <li class="flex gap-2"><span class="material-icons-outlined !text-base text-slate-400">login</span><span>Uses your Instagram login from {{ info.cookies_browser }} on this computer. Stay logged into instagram.com there. The first download may ask for your Mac password to read it (choose Always Allow).</span></li>
             }
           </ul>
-
-          @if (!info.tools_available) {
-            <p class="mt-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-amber-800 dark:text-amber-300">
-              Download tools aren't installed. Run <code class="font-mono">brew install gallery-dl yt-dlp ffmpeg</code>, then restart the backend.
-            </p>
-          }
         } @else {
           <p class="mt-4 text-slate-500 dark:text-slate-400">Loading download settings…</p>
         }
