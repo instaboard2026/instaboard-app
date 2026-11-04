@@ -1,0 +1,32 @@
+<footer class="w-full max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-6 xl:px-6 2xl:px-8 py-6 sm:py-8 lg:py-6 xl:py-5 2xl:py-8 flex flex-wrap justify-between items-center gap-x-4 gap-y-3 border-t border-[#ebebeb] dark:border-slate-800 bg-white dark:bg-primary-bg">
+  <div class="font-display font-bold text-lg sm:text-xl lg:text-lg xl:text-base 2xl:text-xl text-gray-700 dark:text-slate-300">Instaboard</div>
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+    @if (isLoggedIn()) {
+      <button
+        type="button"
+        (click)="downloadsOpen.set(true)"
+        [title]="downloads.info()?.dir ?? 'Download settings'"
+        class="relative inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
+        <span class="material-icons-outlined !text-base">folder</span>
+        <span class="truncate">Downloads{{ downloads.folderName() ? ': ' + downloads.folderName() : '' }}</span>
+        @if (downloads.needsAttention()) {
+          <span class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-amber-500" aria-label="Needs attention"></span>
+        }
+      </button>
+    }
+    <button
+      type="button"
+      (click)="playback.toggleAutoplay()"
+      [attr.aria-pressed]="playback.autoplay()"
+      [title]="playback.autoplay() ? 'Videos play automatically (muted). Click to turn off.' : 'Videos are paused. Click to autoplay them.'"
+      class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
+      <span class="material-icons-outlined !text-base">{{ playback.autoplay() ? 'play_circle' : 'pause_circle' }}</span>
+      Autoplay {{ playback.autoplay() ? 'on' : 'off' }}
+    </button>
+    <app-theme-toggle></app-theme-toggle>
+  </div>
+</footer>
+
+@if (downloadsOpen()) {
+  <app-download-settings-modal (close)="downloadsOpen.set(false)" />
+}

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Instaboard</title>
+  <base href="/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "background-light": "#FFFFFF",
+            "background-dark": "#18181B",
+            "primary-bg": "#121212",
+            "card-bg": "#1E1E1E",
+            // Navigation (Shopify-style dark sidebar, same in light and dark themes)
+            "nav-bg": "#0a0a0a",
+            "nav-hover": "#1f1f1f",
+            "nav-active": "#2b2b2b",
+            "nav-text": "#dcdcdc",
+            "nav-muted": "#a6a6a6",
+            "nav-border": "#262626",
+            // Page text (Shopify admin)
+            "ink": "#101010",
+            "ink-secondary": "#4a4a4a",
+            "ink-placeholder": "#8a8a8a",
+            "surface-hover": "#f7f7f7",
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Outfit', 'sans-serif'],
+          },
+          // Shopify admin type scale: body 13/20, small 12/16, page headings 20 and 28.
+          fontSize: {
+            xs: ['12px', { lineHeight: '16px' }],
+            sm: ['13px', { lineHeight: '20px' }],
+            base: ['14px', { lineHeight: '20px' }],
+            lg: ['16px', { lineHeight: '24px' }],
+            xl: ['20px', { lineHeight: '24px', letterSpacing: '-0.02em' }],
+            '2xl': ['24px', { lineHeight: '28px', letterSpacing: '-0.02em' }],
+            '3xl': ['28px', { lineHeight: '33.6px', letterSpacing: '-0.025em' }],
+          },
+          boxShadow: {
+            card: '0 9px 10px -8px rgba(0,0,0,0.13), 0 -2px 4px rgba(255,255,255,0.5), 0 2px 1px -1px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.07)',
+            'card-hover': '0 24px 24px -10px rgba(0,0,0,0.25), 0 3px 3px -1.5px rgba(0,0,0,0.02), 0 2px 2px -1px rgba(0,0,0,0.02), 0 0 0 1px rgba(0,0,0,0.06)',
+            prompt: '0 0 2px rgba(0,0,0,0.24), 0 2px 12px rgba(0,0,0,0.02), 0 4px 16px rgba(0,0,0,0.02), 0 4px 48px rgba(0,0,0,0.02)',
+            'metric-inset': 'inset 0 0 4px rgba(0,0,0,0.05), inset 0 1px 2px rgba(0,0,0,0.1)',
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&amp;family=Outfit:wght@700&amp;display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet" />
+  <style>
+    body {
+      background-color: #FFFFFF;
+      color: #101010;
+      font-size: 13px;
+      line-height: 20px;
+      letter-spacing: -0.01em;
+    }
+    .dark body {
+      background-color: #18181B;
+      color: #F8FAFC;
+    }
+    /* Shopify's metric numbers: Inter's alternate digits, tabular so values don't jump. */
+    .metric-number {
+      font-feature-settings: "calt", "cv02", "cv03", "cv04", "cv09", "ss03", "tnum";
+      font-variant-numeric: tabular-nums;
+    }
+    .hide-scroll {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .hide-scroll::-webkit-scrollbar {
+      display: none;
+    }
+    /* Drag and drop (Angular CDK): previews are appended to <body>, so these styles are global. */
+    .cdk-drag-preview { box-sizing: border-box; border-radius: 0.5rem; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35); }
+    .cdk-drag-animating { transition: transform 220ms cubic-bezier(0, 0, 0.2, 1); }
+    .cdk-drop-list-dragging .cdk-drag:not(.cdk-drag-placeholder) { transition: transform 220ms cubic-bezier(0, 0, 0.2, 1); }
+    .folder-row.cdk-drag-preview { background: rgba(59, 130, 246, 0.15); color: inherit; list-style: none; }
+    .drop-target-active { background: rgba(37, 99, 235, 0.18) !important; box-shadow: inset 0 0 0 2px rgb(37, 99, 235); color: inherit; }
+    /* Shopify-style scrollbars: no track, and the thumb only appears while the pointer is over the scrolling area. */
+    ::-webkit-scrollbar {
+      width: 11px;
+      height: 11px;
+      background-color: transparent;
+    }
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+      background-color: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background-color: transparent;
+      border: 2px solid transparent;
+      border-radius: 12px;
+      background-clip: content-box;
+    }
+    :hover::-webkit-scrollbar-thumb {
+      background-color: #8c8c8c;
+    }
+    .dark :hover::-webkit-scrollbar-thumb {
+      background-color: #5c5c5c;
+    }
+  </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-ink dark:text-slate-100 font-sans antialiased transition-colors duration-300">
+  <app-root></app-root>
+</body>
+</html>

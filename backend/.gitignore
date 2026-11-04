@@ -1,0 +1,10 @@
+# Local overrides (optional; every setting has a default)
+.env
+
+# Binaries
+/api
+/instaboard
+bin/
+
+# OS
+.DS_Store

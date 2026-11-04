@@ -1,0 +1,258 @@
+<!-- Phone: the expanded sidebar opens as a drawer over the page -->
+@if (isMobile() && isOpen()) {
+  <div (click)="onClose()" class="fixed inset-0 z-40 bg-black/60 md:hidden"></div>
+}
+
+<aside
+  class="fixed left-0 top-0 z-50 flex h-full flex-col overflow-hidden bg-nav-bg text-nav-text"
+  [style.width.px]="isOpen() ? 220 : 56"
+  [class.transition-[width]]="!isInitializing()"
+  [class.duration-300]="!isInitializing()"
+  [class.ease-in-out]="!isInitializing()"
+  [class.shadow-2xl]="isMobile() && isOpen()">
+  @if (isLoading()) {
+    <div class="flex flex-1 flex-col gap-3 p-3 animate-pulse">
+      <div class="h-7 rounded bg-white/10" [class.w-24]="isOpen()" [class.w-8]="!isOpen()"></div>
+      <div class="mt-4 h-7 rounded bg-white/10"></div>
+      <div class="h-7 rounded bg-white/10"></div>
+    </div>
+  } @else if (isOpen()) {
+    <!-- ===== Expanded ===== -->
+    <div class="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+      <a
+        routerLink="/dump"
+        (click)="onNavLinkClick()"
+        class="flex min-w-0 items-center gap-2 rounded-md text-white no-underline hover:opacity-90">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 text-sm font-bold text-white">I</span>
+        <span class="truncate text-sm font-semibold">Instaboard</span>
+      </a>
+      <button
+        type="button"
+        (click)="onToggle()"
+        [appTooltip]="'Collapse navigation'"
+        [appTooltipKeys]="shortcutKeys"
+        aria-label="Collapse navigation"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+        <ng-container *ngTemplateOutlet="panelIcon" />
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto hide-scroll px-2 pb-3">
+      <nav class="flex flex-col gap-0.5 pt-2">
+        <a
+          (click)="onNavLinkClick()"
+          routerLink="/dump"
+          routerLinkActive="!bg-nav-active !text-white"
+          data-drop-folder="dump"
+          class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
+          [class.drop-target-active]="cardDrag.isHovered('dump')">
+          <span class="material-icons-outlined !text-xl shrink-0">home</span>
+          <span class="flex-1">Home</span>
+          @if (isLoggedIn() && dumpCount() > 0) {
+            <span class="min-w-[20px] h-5 rounded-full bg-blue-600 px-1.5 text-center text-[11px] font-semibold leading-5 text-white">{{ dumpCount() }}</span>
+          }
+        </a>
+
+        @if (isLoggedIn()) {
+          <div class="flex items-center justify-between px-2 pt-5 pb-1">
+            <span class="text-xs font-medium text-nav-muted">Folders</span>
+            <button
+              type="button"
+              (click)="createFolder()"
+              [disabled]="creating()"
+              [appTooltip]="'New folder'"
+              aria-label="New folder"
+              class="-mr-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">add</span>
+            </button>
+          </div>
+
+          <div
+            cdkDropList
+            cdkDropListLockAxis="y"
+            [cdkDropListData]="folders()"
+            (cdkDropListDropped)="onReorderDropped($event)"
+            class="flex flex-col gap-0.5">
+            @for (folder of folders(); track folder.id; let i = $index; let first = $first; let last = $last) {
+              <div
+                cdkDrag
+                [cdkDragData]="folder"
+                [cdkDragDisabled]="renamingId() === folder.id"
+                [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+                (cdkDragStarted)="onReorderStarted()"
+                [attr.data-drop-folder]="folder.id"
+                role="link"
+                tabindex="0"
+                (click)="openFolder(folder)"
+                (keydown.enter)="openFolder(folder)"
+                class="folder-row group relative flex h-[30px] cursor-pointer items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
+                [class.!bg-nav-active]="isActiveFolder(folder)"
+                [class.!text-white]="isActiveFolder(folder)"
+                [class.drop-target-active]="cardDrag.isHovered(folder.id)">
+                <span class="material-icons-outlined !text-xl shrink-0">folder</span>
+
+                @if (renamingId() === folder.id) {
+                  <input
+                    #nameInput
+                    appAutofocusSelect
+                    type="text"
+                    maxlength="50"
+                    [value]="folder.name"
+                    (click)="$event.stopPropagation()"
+                    (keydown.enter)="$event.stopPropagation(); commitRename(folder, nameInput.value)"
+                    (keydown.escape)="cancelRename()"
+                    (blur)="commitRename(folder, nameInput.value)"
+                    aria-label="Folder name"
+                    class="min-w-0 flex-1 rounded-md border border-blue-500 bg-[#1a1a1a] px-1.5 py-0.5 text-sm text-white outline-none focus:ring-0" />
+                } @else {
+                  <span class="min-w-0 flex-1 truncate">{{ folder.name }}</span>
+                  @if (folder.count > 0) {
+                    <span class="text-xs text-nav-muted group-hover:hidden" [class.hidden]="menuOpenId() === folder.id">{{ folder.count }}</span>
+                  }
+                  <button
+                    type="button"
+                    (click)="toggleMenu(folder, $event)"
+                    [attr.aria-label]="'Options for ' + folder.name"
+                    class="hidden group-hover:inline-flex -mr-1 h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-active hover:text-white"
+                    [class.!inline-flex]="menuOpenId() === folder.id">
+                    <span class="material-icons-outlined !text-base">more_horiz</span>
+                  </button>
+                }
+
+                @if (menuOpenId() === folder.id) {
+                  <div
+                    (click)="$event.stopPropagation()"
+                    class="absolute right-1 top-full z-20 mt-1 w-44 overflow-hidden rounded-xl border border-nav-border bg-[#1a1a1a] p-1 text-xs text-nav-text shadow-2xl">
+                    <button type="button" (click)="startRename(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                      <span class="material-icons-outlined !text-base">edit</span> Rename
+                    </button>
+                    <button type="button" (click)="moveFolder(i, -1, $event)" [disabled]="first" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                      <span class="material-icons-outlined !text-base">arrow_upward</span> Move up
+                    </button>
+                    <button type="button" (click)="moveFolder(i, 1, $event)" [disabled]="last" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                      <span class="material-icons-outlined !text-base">arrow_downward</span> Move down
+                    </button>
+                    <div class="my-1 border-t border-nav-border"></div>
+                    <button type="button" (click)="deleteFolder(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-red-400 hover:bg-red-500/10">
+                      <span class="material-icons-outlined !text-base">delete</span> Delete
+                    </button>
+                  </div>
+                }
+
+                <div *cdkDragPlaceholder class="my-0.5 h-[30px] rounded-xl border border-dashed border-white/25 bg-white/5"></div>
+              </div>
+              @if (renamingId() === folder.id && renameError()) {
+                <p class="px-2.5 pb-1 text-[11px] text-red-400" role="alert">{{ renameError() }}</p>
+              }
+            } @empty {
+              <p class="px-2.5 py-1 text-xs text-nav-muted">No folders yet. Click + to create one.</p>
+            }
+          </div>
+
+          @if (foldersService.notice()) {
+            <p class="mx-1 mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300" role="alert">{{ foldersService.notice() }}</p>
+          }
+        }
+      </nav>
+    </div>
+
+    <!-- Footer: account (logged in) or Sign In / Sign Up -->
+    <div class="shrink-0 border-t border-nav-border p-2">
+      @if (isLoggedIn() && displayName(); as name) {
+        <button
+          type="button"
+          (click)="openAccountMenu($event)"
+          aria-label="Open account menu"
+          class="flex w-full items-center gap-2 rounded-xl px-2 py-1 text-left transition-colors hover:bg-nav-hover">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-xs font-bold uppercase text-black">{{ name.charAt(0) }}</span>
+          <span class="min-w-0 flex-1 truncate text-sm font-[450] text-nav-text">{{ name }}</span>
+          <span class="material-icons-outlined !text-lg text-nav-muted">unfold_more</span>
+        </button>
+      } @else {
+        <div class="flex items-center gap-2 px-2 py-1" aria-hidden="true">
+          <span class="h-7 w-7 shrink-0 rounded-lg bg-white/10"></span>
+          <span class="h-3 w-24 rounded bg-white/10"></span>
+        </div>
+      }
+    </div>
+  } @else {
+    <!-- ===== Collapsed icon rail ===== -->
+    <div class="flex justify-center pt-3 pb-2">
+      <button
+        type="button"
+        (click)="onToggle()"
+        [appTooltip]="'Expand navigation'"
+        [appTooltipKeys]="shortcutKeys"
+        aria-label="Expand navigation"
+        class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+        <ng-container *ngTemplateOutlet="panelIcon" />
+      </button>
+    </div>
+
+    <nav class="flex flex-1 flex-col items-center gap-1 overflow-y-auto hide-scroll px-2 pb-3 pt-1">
+      <a
+        routerLink="/dump"
+        routerLinkActive="!bg-nav-active !text-white"
+        data-drop-folder="dump"
+        [appTooltip]="'Home'"
+        aria-label="Home"
+        class="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
+        [class.drop-target-active]="cardDrag.isHovered('dump')">
+        <span class="material-icons-outlined !text-xl">home</span>
+        @if (isLoggedIn() && dumpCount() > 0) {
+          <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-nav-bg"></span>
+        }
+      </a>
+
+      @if (isLoggedIn()) {
+        <div class="my-2 h-px w-6 shrink-0 bg-nav-border"></div>
+        @for (folder of folders(); track folder.id) {
+          <button
+            type="button"
+            (click)="openFolder(folder)"
+            [attr.data-drop-folder]="folder.id"
+            [appTooltip]="folder.name"
+            [attr.aria-label]="folder.name"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
+            [class.!bg-nav-active]="isActiveFolder(folder)"
+            [class.!text-white]="isActiveFolder(folder)"
+            [class.drop-target-active]="cardDrag.isHovered(folder.id)">
+            <span class="material-icons-outlined !text-xl">folder</span>
+          </button>
+        }
+        <button
+          type="button"
+          (click)="createFolderFromRail()"
+          [disabled]="creating()"
+          [appTooltip]="'New folder'"
+          aria-label="New folder"
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-muted transition-colors hover:bg-nav-hover hover:text-white disabled:opacity-50">
+          <span class="material-icons-outlined !text-xl">create_new_folder</span>
+        </button>
+      }
+    </nav>
+
+    <div class="flex shrink-0 justify-center border-t border-nav-border py-2.5">
+      @if (isLoggedIn() && displayName(); as name) {
+        <button
+          type="button"
+          (click)="openAccountMenu($event)"
+          [appTooltip]="name"
+          aria-label="Open account menu"
+          class="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-xs font-bold uppercase text-black transition hover:opacity-90">
+          {{ name.charAt(0) }}
+        </button>
+      } @else {
+        <span class="h-8 w-8 rounded-lg bg-white/10" aria-hidden="true"></span>
+      }
+    </div>
+  }
+</aside>
+
+<!-- Shopify-style "sidebar panel" glyph (no exact match in Material Icons). -->
+<ng-template #panelIcon>
+  <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="3" stroke="currentColor" stroke-width="1.5" />
+    <path d="M7.75 4v12" stroke="currentColor" stroke-width="1.5" />
+  </svg>
+</ng-template>

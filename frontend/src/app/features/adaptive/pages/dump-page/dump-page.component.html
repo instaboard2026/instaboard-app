@@ -1,0 +1,331 @@
+<div
+  class="w-full max-w-screen-2xl mx-auto text-ink dark:text-slate-100"
+  [class]="folderId() === null ? 'px-2 pt-2 pb-10' : 'px-4 sm:px-6 py-6'">
+  @if (folderId() === null) {
+    <!-- Home: metric strip (Shopify-style: totals left, sources centered, right kept empty) -->
+    @if (isLoggedIn()) {
+      <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-start gap-y-1 px-2 pt-2 pb-1">
+        <span class="flex items-center whitespace-nowrap pt-2 text-sm text-ink-secondary dark:text-slate-400">
+          Total downloads · {{ stats()?.total_downloads ?? '–' }}
+        </span>
+        <div class="flex items-center overflow-x-auto hide-scroll md:justify-center">
+          <ng-container *ngTemplateOutlet="metric; context: { label: 'Instagram', value: stats()?.by_source?.instagram ?? '–' }" />
+          <ng-container *ngTemplateOutlet="metric; context: { label: 'YouTube', value: stats()?.by_source?.youtube ?? '–' }" />
+          <ng-container *ngTemplateOutlet="metric; context: { label: 'Pinterest', value: stats()?.by_source?.pinterest ?? '–' }" />
+        </div>
+        <div class="flex md:justify-end">
+          <span class="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-2xl p-2 transition-colors duration-150 hover:bg-[#fafafa] hover:shadow-metric-inset dark:hover:bg-white/5 dark:hover:shadow-none">
+            <span class="text-sm text-ink-secondary dark:text-slate-400">Storage</span>
+            <span class="metric-number text-xs leading-5 font-semibold text-ink dark:text-white">{{ stats() ? formatBytes(stats()!.storage_bytes) : '–' }}</span>
+          </span>
+        </div>
+      </div>
+    }
+
+    <!-- Home: greeting + prompt-style paste box -->
+    <div class="mx-auto max-w-[636px] px-2 pt-16 text-center">
+      <h1 class="mx-auto max-w-[600px] text-3xl font-medium text-ink dark:text-white">
+        {{ boardTitle() }}<br />
+        What do you want to save next?
+      </h1>
+      <form
+        class="mt-8 rounded-[26px] bg-white dark:bg-card-bg p-3.5 text-left shadow-prompt dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+        (ngSubmit)="addLink()">
+        <input
+          #homeLinkInput
+          type="text"
+          inputmode="url"
+          name="link"
+          [ngModel]="linkInput()"
+          (ngModelChange)="linkInput.set($event); addError.set(null)"
+          placeholder="Paste an Instagram, Pinterest or YouTube link…"
+          autocomplete="off"
+          aria-label="Link to save"
+          class="w-full border-0 bg-transparent px-0.5 pt-0.5 pb-3 text-sm text-ink dark:text-white placeholder:text-ink-placeholder outline-none shadow-none focus:border-0 focus:outline-none focus:ring-0" />
+        <div class="flex items-center gap-2">
+          <span class="hidden sm:inline-flex items-center gap-2 pl-0.5" role="img" aria-label="Supports Instagram, Pinterest and YouTube">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="#E4405F" stroke-width="2" aria-hidden="true">
+              <title>Instagram</title>
+              <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" />
+              <circle cx="12" cy="12" r="4.25" />
+              <circle cx="17.4" cy="6.6" r="0.6" fill="#E4405F" stroke="none" />
+            </svg>
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="#BD081C" aria-hidden="true">
+              <title>Pinterest</title>
+              <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.688 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.401.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.354-.629-2.758-1.379l-.749 2.848c-.269 1.045-1.004 2.352-1.498 3.146 1.123.345 2.306.535 3.55.535 6.607 0 11.985-5.365 11.985-11.987C23.97 5.39 18.592.026 11.985.026L12.017 0z" />
+            </svg>
+            <svg viewBox="0 0 24 24" class="h-4 w-4" aria-hidden="true">
+              <title>YouTube</title>
+              <rect x="1" y="4.5" width="22" height="15" rx="4.5" fill="#FF0000" />
+              <path d="M9.75 8.75v6.5L15.5 12z" fill="#fff" />
+            </svg>
+          </span>
+          <div class="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              (click)="pasteFromClipboard(homeLinkInput)"
+              class="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-sm font-medium text-ink dark:text-slate-200 hover:bg-surface-hover dark:hover:bg-slate-800">
+              <span class="material-icons-outlined !text-base">content_paste</span>
+              Paste
+            </button>
+            <button
+              type="submit"
+              [disabled]="adding() || !linkInput().trim()"
+              [attr.aria-label]="adding() ? 'Saving' : 'Save link'"
+              [title]="adding() ? 'Saving…' : 'Save link'"
+              class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-ink transition hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed">
+              <span class="material-icons-outlined !text-lg" [class.animate-spin]="adding()">{{ adding() ? 'progress_activity' : 'arrow_upward' }}</span>
+            </button>
+          </div>
+        </div>
+      </form>
+      @if (addError()) {
+        <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
+      }
+      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Reels you share from your phone land here too. Download the ones you want, or drag them into a folder.</p>
+    </div>
+  } @else {
+      <!-- Folder header: title + count, per-row switch, Add link -->
+    <div class="flex items-center justify-between gap-4 mb-5">
+      <div class="flex items-baseline gap-3">
+        <h1 class="flex min-w-0 items-center gap-2 text-xl font-semibold">
+          @if (folderId() !== null) {
+            <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">folder</span>
+          }
+          <span class="truncate">{{ heading() }}</span>
+        </h1>
+        @if (isLoggedIn()) {
+          <span class="shrink-0 text-sm text-ink-secondary dark:text-slate-400">{{ count() }} {{ count() === 1 ? 'link' : 'links' }}</span>
+        }
+      </div>
+
+      <div class="flex items-center gap-2">
+      <div class="hidden md:flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5" role="group" aria-label="Cards per row">
+        <span class="px-2 text-xs text-ink-secondary dark:text-slate-400">Per row</span>
+        @for (n of perRowOptions; track n) {
+          <button
+            type="button"
+            (click)="setPerRow(n)"
+            [attr.aria-pressed]="perRow() === n"
+            class="h-7 min-w-[32px] px-2 rounded-[10px] text-sm font-medium transition-colors"
+            [class.bg-white]="perRow() === n"
+            [class.dark:bg-slate-700]="perRow() === n"
+            [class.shadow-sm]="perRow() === n"
+            [class.text-ink]="perRow() === n"
+            [class.dark:text-white]="perRow() === n"
+            [class.text-ink-secondary]="perRow() !== n"
+            [class.dark:text-slate-400]="perRow() !== n">
+            {{ n }}
+          </button>
+        }
+      </div>
+      @if (folderId() !== null && isLoggedIn()) {
+        <button
+          type="button"
+          (click)="openAddDialog()"
+          class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] bg-[#303030] hover:bg-[#1a1a1a] text-white text-sm font-semibold whitespace-nowrap shadow-[inset_0_-1px_0_#000,inset_0_1px_0_rgba(255,255,255,0.18)] transition-colors dark:bg-white dark:text-ink dark:hover:bg-slate-200">
+          <span class="material-icons-outlined !text-lg">add</span>
+          Add link
+        </button>
+      }
+      </div>
+    </div>
+  }
+
+  <!-- Content: on Home a centered column like Shopify's home feed -->
+  <div [class]="folderId() === null ? 'mx-auto mt-[72px] max-w-[936px] px-0.5' : ''">
+  @if (!isLoggedIn()) {
+    @if (sessionStatus() === 'error') {
+      <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-6 text-center" role="alert">
+        <p class="text-sm font-semibold text-red-700 dark:text-red-300">Can't reach Instaboard</p>
+        <p class="mt-1 text-sm text-red-700/80 dark:text-red-300/80">Make sure the Instaboard app is running, then try again.</p>
+        <button type="button" (click)="retrySession()" class="mt-3 text-sm font-semibold text-red-700 dark:text-red-300 underline">Try again</button>
+      </div>
+    } @else {
+      <p class="py-10 text-center text-sm text-ink-secondary dark:text-slate-400">Opening your Instaboard…</p>
+    }
+  } @else if (loadError()) {
+    <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-6 text-center">
+      <p class="text-sm text-red-700 dark:text-red-300">{{ loadError() }}</p>
+      <button type="button" (click)="reload()" class="mt-3 text-sm font-semibold text-red-700 dark:text-red-300 underline">Try again</button>
+    </div>
+  } @else if (loading()) {
+    <div class="grid gap-4" [class]="gridClass()" [style.--per-row]="perRow()">
+      @for (i of [1, 2, 3, 4, 5, 6]; track i) {
+        <div class="w-full aspect-[9/16] rounded-2xl bg-[#f1f1f1] dark:bg-slate-800 animate-pulse"></div>
+      }
+    </div>
+  } @else if (saves().length === 0) {
+    <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center">
+      <span class="material-icons-outlined !text-4xl text-slate-400">inbox</span>
+      @if (folderId() === null) {
+        <p class="mt-2 font-semibold">Nothing here yet</p>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Paste a link above to save your first reel.</p>
+      } @else {
+        <p class="mt-2 font-semibold">This folder is empty</p>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Drag cards here from Home, or paste a link above.</p>
+      }
+    </div>
+  } @else {
+    <div
+      cdkDropList
+      cdkDropListSortingDisabled
+      class="grid gap-4"
+      [class]="gridClass()"
+      [style.--per-row]="perRow()">
+      @for (save of saves(); track save.id) {
+        <div
+          cdkDrag
+          [cdkDragData]="save"
+          [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+          (cdkDragStarted)="onCardDragStarted(save)"
+          (cdkDragMoved)="onCardDragMoved($event)"
+          (cdkDragEnded)="onCardDragEnded(save, $event)"
+          class="min-w-0 cursor-grab active:cursor-grabbing">
+          <ng-container *ngTemplateOutlet="saveCard; context: { $implicit: save }" />
+          <ng-container *cdkDragPreview>
+            <ng-container *ngTemplateOutlet="dragChip; context: { $implicit: save }" />
+          </ng-container>
+          <div *cdkDragPlaceholder class="h-full min-h-[120px] rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
+        </div>
+      }
+    </div>
+  }
+  </div>
+</div>
+
+<ng-template #saveCard let-save>
+  <div class="min-w-0 flex flex-col gap-2">
+    <!-- Card surface: Shopify's layered shadow, lifting slightly on hover. -->
+    <div class="overflow-hidden rounded-2xl shadow-card transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-card-hover dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+    @if (save.download?.media?.length) {
+      <!-- Instagram reel shape (9:16). Carousels swipe sideways. -->
+      <app-media-carousel [media]="save.download.media" />
+    } @else {
+      <!-- Same 9:16 frame, nothing to preview yet: download from here. -->
+      <div class="relative flex w-full aspect-[9/16] flex-col items-center justify-center gap-3 overflow-hidden bg-[#f5f6f7] dark:bg-slate-800/60 p-3 text-center">
+        @if (canDownload(save)) {
+          <button
+            type="button"
+            (click)="download(save)"
+            [disabled]="downloadingIds().has(save.id)"
+            [attr.aria-label]="downloadingIds().has(save.id) ? 'Downloading' : 'Download'"
+            [title]="downloadingIds().has(save.id) ? 'Downloading…' : 'Download'"
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-md ring-1 ring-slate-200 dark:ring-slate-700 transition hover:scale-105 hover:text-blue-600 dark:hover:text-blue-400 disabled:cursor-wait disabled:hover:scale-100">
+            <span class="material-icons-outlined !text-3xl" [class.animate-spin]="downloadingIds().has(save.id)">{{ downloadingIds().has(save.id) ? 'progress_activity' : 'download' }}</span>
+          </button>
+          <span class="text-xs text-ink-secondary dark:text-slate-400">
+            {{ downloadingIds().has(save.id) ? 'Downloading…' : (downloadErrors().has(save.id) ? 'Tap to try again' : 'Download to preview') }}
+          </span>
+          @if (downloadErrors().get(save.id); as err) {
+            <p class="text-[11px] leading-snug text-red-600 dark:text-red-400" role="alert">{{ err }}</p>
+          }
+        } @else {
+          <span class="flex h-14 w-14 items-center justify-center rounded-full bg-white/60 dark:bg-slate-900/60 text-slate-400">
+            <span class="material-icons-outlined !text-3xl">file_download_off</span>
+          </span>
+          <span class="text-xs text-ink-secondary dark:text-slate-400">Downloads support Instagram links only</span>
+        }
+      </div>
+    }
+    </div>
+    <div class="flex min-w-0 items-center gap-2 px-0.5 text-xs">
+      <span class="shrink-0 px-1.5 py-0.5 rounded-md border border-[#e3e3e3] dark:border-slate-600 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
+      <span class="min-w-0 truncate text-ink-secondary dark:text-slate-400">From {{ addedFrom(save) }} · {{ timeAgo(save) }}</span>
+      <span class="ml-auto shrink-0 inline-flex items-center gap-0.5">
+        <a
+          [href]="save.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open link"
+          aria-label="Open link"
+          class="inline-flex p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-slate-800">
+          <span class="material-icons-outlined !text-base">open_in_new</span>
+        </a>
+        <button
+          type="button"
+          (click)="copyLink(save)"
+          [title]="copiedId() === save.id ? 'Copied' : 'Copy link'"
+          [attr.aria-label]="copiedId() === save.id ? 'Link copied' : 'Copy link'"
+          class="inline-flex p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-slate-800">
+          <span class="material-icons-outlined !text-base" [class.!text-green-600]="copiedId() === save.id">{{ copiedId() === save.id ? 'check' : 'content_copy' }}</span>
+        </button>
+        @if (save.download) {
+          <span class="ml-1 inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400">
+            <span class="material-icons-outlined !text-sm">check_circle</span>
+            {{ downloadLabel(save) }}
+          </span>
+        } @else {
+          <span class="ml-1 text-slate-500 dark:text-slate-400">Not downloaded</span>
+        }
+      </span>
+    </div>
+  </div>
+</ng-template>
+
+<!-- Metric item (Shopify home strip): grey label over a semibold value, with a pressed look on hover. -->
+<ng-template #metric let-label="label" let-value="value">
+  <div class="flex min-w-[138px] shrink-0 flex-col items-center overflow-hidden whitespace-nowrap rounded-2xl p-2 text-center transition-colors duration-150 hover:bg-[#fafafa] hover:shadow-metric-inset dark:hover:bg-white/5 dark:hover:shadow-none">
+    <span class="max-w-full truncate text-sm text-ink-secondary dark:text-slate-400">{{ label }}</span>
+    <span class="metric-number text-xs leading-5 font-semibold text-ink dark:text-white">{{ value }}</span>
+  </div>
+</ng-template>
+
+<!-- Compact drag preview: follows the pointer instead of the full 9:16 card. -->
+<ng-template #dragChip let-save>
+  <div class="flex max-w-[260px] items-center gap-2 rounded-xl border border-blue-500/60 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 shadow-2xl">
+    @if (save.download?.media?.[0]; as m) {
+      @if (m.type === 'image') {
+        <img [src]="m.url" alt="" class="h-10 w-7 shrink-0 rounded object-cover" />
+      } @else {
+        <span class="flex h-10 w-7 shrink-0 items-center justify-center rounded bg-black text-white"><span class="material-icons-outlined !text-base">play_arrow</span></span>
+      }
+    } @else {
+      <span class="shrink-0 rounded border border-slate-300 dark:border-slate-600 px-1.5 py-0.5 text-[10px] font-bold">{{ badge(save) }}</span>
+    }
+    <span class="min-w-0">
+      <span class="block font-semibold">Move 1 item</span>
+      <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
+    </span>
+  </div>
+</ng-template>
+
+<!-- Add link popup (folder pages) -->
+@if (addDialogOpen()) {
+  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[18vh]" role="dialog" aria-modal="true" aria-labelledby="add-link-title">
+    <div class="absolute inset-0 bg-black/60" (click)="closeAddDialog()"></div>
+    <form
+      class="relative w-full max-w-lg rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-slate-900 dark:text-slate-100 shadow-xl"
+      (ngSubmit)="addLink()">
+      <div class="flex items-start justify-between gap-4">
+        <h2 id="add-link-title" class="text-lg font-bold">Add link to "{{ heading() }}"</h2>
+        <button type="button" (click)="closeAddDialog()" aria-label="Close" class="-m-1 p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <span class="material-icons-outlined">close</span>
+        </button>
+      </div>
+      <input
+        appAutofocusSelect
+        type="text"
+        inputmode="url"
+        name="dialogLink"
+        [ngModel]="linkInput()"
+        (ngModelChange)="linkInput.set($event); addError.set(null)"
+        placeholder="Paste an Instagram, Pinterest or YouTube link..."
+        autocomplete="off"
+        class="mt-4 w-full h-12 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-base placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none" />
+      @if (addError()) {
+        <p class="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
+      }
+      <div class="mt-5 flex justify-end gap-2">
+        <button type="button" (click)="closeAddDialog()" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">Cancel</button>
+        <button
+          type="submit"
+          [disabled]="adding() || !linkInput().trim()"
+          class="px-4 py-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold">
+          <span class="material-icons-outlined !text-lg">add</span>
+          {{ adding() ? 'Adding…' : 'Add link' }}
+        </button>
+      </div>
+    </form>
+  </div>
+}

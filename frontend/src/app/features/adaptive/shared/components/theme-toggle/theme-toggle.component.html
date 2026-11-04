@@ -1,0 +1,11 @@
+<button
+  (click)="toggleTheme()"
+  class="w-9 h-9 sm:w-10 sm:h-10 lg:w-9 lg:h-9 xl:w-8 xl:h-8 2xl:w-10 2xl:h-10 flex items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+  [attr.aria-label]="isDarkMode() ? 'Switch to light mode' : 'Switch to dark mode'"
+>
+  @if (isDarkMode()) {
+    <span class="material-icons-outlined text-xl sm:text-2xl lg:text-xl xl:text-lg 2xl:text-2xl text-ink dark:text-white">light_mode</span>
+  } @else {
+    <span class="material-icons-outlined text-xl sm:text-2xl lg:text-xl xl:text-lg 2xl:text-2xl text-ink dark:text-white">dark_mode</span>
+  }
+</button>

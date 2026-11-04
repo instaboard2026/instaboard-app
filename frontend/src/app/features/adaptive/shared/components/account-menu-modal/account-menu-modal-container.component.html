@@ -1,0 +1,9 @@
+@if (isOpen()) {
+  <div
+    (click)="$event.stopPropagation()"
+    class="fixed w-[min(240px,calc(100vw-2rem))] bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-[999] overflow-hidden"
+    [style.left.px]="position().left"
+    [style.bottom.px]="position().bottom">
+    <app-account-menu-modal></app-account-menu-modal>
+  </div>
+}
