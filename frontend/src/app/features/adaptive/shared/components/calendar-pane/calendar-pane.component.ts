@@ -22,7 +22,7 @@ interface CalendarCell {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 /** Max mini cards shown per day tile before a +N overflow. */
-const MAX_THUMBS = 2;
+const MAX_THUMBS = 4;
 
 @Component({
   selector: 'app-calendar-pane',

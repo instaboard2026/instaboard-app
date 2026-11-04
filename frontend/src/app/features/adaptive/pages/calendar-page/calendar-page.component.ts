@@ -9,10 +9,11 @@ interface CalendarCell {
   day: number;
   weekday: string;
   isToday: boolean;
+  isSunday: boolean;
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
-const MAX_THUMBS = 3;
+const MAX_THUMBS = 4;
 
 @Component({
   selector: 'app-calendar-page',
@@ -60,22 +61,41 @@ const MAX_THUMBS = 3;
                 [attr.data-drop-calendar]="cell.key"
                 (click)="selectDay(cell)"
                 class="group relative flex min-h-[140px] flex-col rounded-xl border border-[#ebebeb] p-2.5 text-left transition-colors hover:bg-[#fafafa] dark:border-slate-800 dark:hover:bg-white/5 sm:min-h-[160px]"
+                [class.bg-rose-50]="cell.isSunday && selectedKey() !== cell.key"
+                [class.dark:bg-rose-500/10]="cell.isSunday && selectedKey() !== cell.key"
+                [class.border-rose-100]="cell.isSunday && selectedKey() !== cell.key"
+                [class.dark:border-rose-500/20]="cell.isSunday && selectedKey() !== cell.key"
+                [class.hover:bg-rose-100]="cell.isSunday && selectedKey() !== cell.key"
                 [class.bg-blue-50]="selectedKey() === cell.key"
                 [class.dark:bg-blue-500/10]="selectedKey() === cell.key"
                 [class.ring-2]="cell.isToday || selectedKey() === cell.key || cardDrag.isCalendarHovered(cell.key)"
                 [class.ring-blue-500]="cell.isToday || selectedKey() === cell.key || cardDrag.isCalendarHovered(cell.key)">
-                <div class="flex items-baseline gap-1.5">
+                <div class="flex items-center gap-1.5">
                   <span
-                    class="inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-full px-1.5 text-sm font-semibold"
-                    [class.text-ink]="!cell.isToday"
-                    [class.dark:text-slate-100]="!cell.isToday"
-                    [class.bg-blue-600]="cell.isToday"
-                    [class.text-white]="cell.isToday">
+                    class="text-sm font-semibold tabular-nums"
+                    [class.text-ink]="!cell.isSunday"
+                    [class.text-rose-600]="cell.isSunday"
+                    [class.dark:text-slate-100]="!cell.isSunday"
+                    [class.dark:text-rose-300]="cell.isSunday">
                     {{ cell.day }}
                   </span>
-                  <span class="text-xs font-medium uppercase tracking-wide text-ink-secondary dark:text-slate-500">
+                  <span
+                    class="text-xs font-medium uppercase tracking-wide"
+                    [class.text-ink-secondary]="!cell.isSunday"
+                    [class.dark:text-slate-500]="!cell.isSunday"
+                    [class.text-rose-500]="cell.isSunday"
+                    [class.dark:text-rose-300]="cell.isSunday">
                     {{ cell.weekday }}
                   </span>
+                  @if (savesOn(cell.key).length; as n) {
+                    @if (n > 0) {
+                      <span
+                        class="ml-auto inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold tabular-nums text-white"
+                        [attr.aria-label]="n + (n === 1 ? ' item scheduled' : ' items scheduled')">
+                        {{ n }}
+                      </span>
+                    }
+                  }
                 </div>
                 <div class="mt-2 flex min-h-0 flex-1 items-end gap-1.5">
                   @for (save of savesOn(cell.key); track save.id; let i = $index) {
@@ -268,6 +288,7 @@ function buildMonthDays(monthStart: Date): CalendarCell[] {
       day,
       weekday: WEEKDAYS[d.getDay()],
       isToday: key === todayKey,
+      isSunday: d.getDay() === 0,
     });
   }
 

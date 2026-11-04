@@ -11,6 +11,7 @@ const (
 	SourceInstagram = "instagram"
 	SourcePinterest = "pinterest"
 	SourceYouTube   = "youtube"
+	SourceLocal     = "local" // dropped/uploaded image (no remote URL)
 )
 
 const maxLinkLength = 2048

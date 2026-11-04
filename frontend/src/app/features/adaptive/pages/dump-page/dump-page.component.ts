@@ -34,13 +34,17 @@ const SOURCE_BADGE: Record<SaveSource, string> = {
   instagram: 'IG',
   pinterest: 'PIN',
   youtube: 'YT',
+  local: 'IMG',
 };
 
 const ADDED_FROM_LABEL: Record<string, string> = {
   web: 'Web',
   iphone: 'iPhone',
   android: 'Android',
+  drop: 'Drop',
 };
+
+const IMAGE_FILE_RE = /\.(png|jpe?g|webp|gif)$/i;
 
 @Component({
   selector: 'app-dump-page',
@@ -117,6 +121,8 @@ export class DumpPageComponent {
   copiedId = signal<number | null>(null);
   downloadingIds = signal<ReadonlySet<number>>(new Set());
   downloadErrors = signal<ReadonlyMap<number, string>>(new Map());
+  revealingId = signal<number | null>(null);
+  revealError = signal<string | null>(null);
 
   perRow = signal<PerRow>(6);
   linkInput = signal('');
@@ -127,6 +133,10 @@ export class DumpPageComponent {
   /** Card metadata popup (source, when saved, download status, link actions). */
   detailsSave = signal<Save | null>(null);
   loadError = signal<string | null>(null);
+  /** True while dragging image files over the board (not CDK card drags). */
+  fileDragOver = signal(false);
+  uploading = signal(false);
+  private fileDragDepth = 0;
 
   constructor() {
     const saved = this.cacheService.getItem<number>(PER_ROW_KEY);
@@ -300,11 +310,28 @@ export class DumpPageComponent {
   }
 
   openDetails(save: Save): void {
+    this.revealError.set(null);
     this.detailsSave.set(save);
   }
 
   closeDetails(): void {
     this.detailsSave.set(null);
+    this.revealError.set(null);
+    this.revealingId.set(null);
+  }
+
+  /** Opens the downloaded file in Finder / File Explorer. */
+  revealInFinder(save: Save): void {
+    if (!save.download?.path || this.revealingId() === save.id) return;
+    this.revealingId.set(save.id);
+    this.revealError.set(null);
+    this.dumpService.reveal(save.id).subscribe({
+      next: () => this.revealingId.set(null),
+      error: (err: Error) => {
+        this.revealingId.set(null);
+        this.revealError.set(err?.message || 'Could not open that location.');
+      },
+    });
   }
 
   @HostListener('document:keydown.escape')
@@ -418,6 +445,60 @@ export class DumpPageComponent {
     return save.source === 'instagram';
   }
 
+  isLocal(save: Save): boolean {
+    return save.source === 'local';
+  }
+
+  /** Board accepts Finder image drops on Home / folders (not Bin). */
+  acceptsFileDrop(): boolean {
+    return this.isLoggedIn() && !this.isBin() && !this.uploading();
+  }
+
+  onFileDragEnter(ev: DragEvent): void {
+    if (!this.acceptsFileDrop() || !dragHasFiles(ev)) return;
+    ev.preventDefault();
+    this.fileDragDepth += 1;
+    this.fileDragOver.set(true);
+  }
+
+  onFileDragOver(ev: DragEvent): void {
+    if (!this.acceptsFileDrop() || !dragHasFiles(ev)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  }
+
+  onFileDragLeave(ev: DragEvent): void {
+    if (!dragHasFiles(ev) && !this.fileDragOver()) return;
+    ev.preventDefault();
+    this.fileDragDepth = Math.max(0, this.fileDragDepth - 1);
+    if (this.fileDragDepth === 0) this.fileDragOver.set(false);
+  }
+
+  onFileDrop(ev: DragEvent): void {
+    ev.preventDefault();
+    this.fileDragDepth = 0;
+    this.fileDragOver.set(false);
+    if (!this.acceptsFileDrop()) return;
+    const files = imageFilesFromDrop(ev.dataTransfer?.files);
+    if (!files.length) {
+      this.addError.set('Only PNG, JPEG, WebP and GIF images can be dropped.');
+      return;
+    }
+    this.uploading.set(true);
+    this.addError.set(null);
+    const scope = this.scope();
+    this.dumpService.upload(files, scope).subscribe({
+      next: () => {
+        this.uploading.set(false);
+        if (scope === 'dump') this.loadStats();
+      },
+      error: (err: Error) => {
+        this.uploading.set(false);
+        this.addError.set(err?.message || 'Could not save those images.');
+      },
+    });
+  }
+
   downloadLabel(save: Save): string {
     const d = save.download;
     if (!d) return '';
@@ -468,4 +549,19 @@ function copyWithTextarea(text: string): boolean {
   }
   el.remove();
   return ok;
+}
+
+function dragHasFiles(ev: DragEvent): boolean {
+  const types = ev.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types as ArrayLike<string>).includes('Files');
+}
+
+function imageFilesFromDrop(list: FileList | null | undefined): File[] {
+  if (!list?.length) return [];
+  return Array.from(list).filter(
+    (f) =>
+      (f.type && /^image\/(png|jpe?g|webp|gif)$/i.test(f.type)) ||
+      IMAGE_FILE_RE.test(f.name || '')
+  );
 }

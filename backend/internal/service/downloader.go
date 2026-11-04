@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,8 @@ type DownloadState struct {
 	Kind  string      `json:"kind"`
 	Files int         `json:"files"`
 	Media []MediaItem `json:"media,omitempty"`
+	// Path is the absolute filesystem path to reveal in Finder (primary file).
+	Path string `json:"path,omitempty"`
 }
 
 // Downloader runs gallery-dl (which uses yt-dlp + ffmpeg for Instagram videos) and stores
@@ -142,6 +145,39 @@ func (d *Downloader) Status(dir string, id uint64) *DownloadState {
 	return nil
 }
 
+// StoreLocalImage writes a dropped/uploaded image as <id>/1.<ext> (same layout as a photo post).
+// ext must include the leading dot (e.g. ".png").
+func (d *Downloader) StoreLocalImage(dir string, id uint64, ext string, r io.Reader) (*DownloadState, error) {
+	ext = strings.ToLower(strings.TrimSpace(ext))
+	if ext == "" || ext[0] != '.' || strings.ContainsAny(ext, `/\`) {
+		return nil, fmt.Errorf("invalid image extension")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create download folder: %w", err)
+	}
+	_ = d.RemoveFiles(dir, id)
+	postDir := filepath.Join(dir, strconv.FormatUint(id, 10))
+	if err := os.MkdirAll(postDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create save folder: %w", err)
+	}
+	dest := filepath.Join(postDir, "1"+ext)
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		_ = os.RemoveAll(postDir)
+		return nil, err
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		_ = os.RemoveAll(postDir)
+		return nil, fmt.Errorf("write image: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.RemoveAll(postDir)
+		return nil, err
+	}
+	return &DownloadState{Kind: DownloadKindPost, Files: 1}, nil
+}
+
 // MediaFiles lists a save's downloaded file names in display order: "<id>.mp4" for a video, or the
 // files inside "<id>/" for a post.
 func (d *Downloader) MediaFiles(dir string, id uint64) []string {
@@ -188,6 +224,15 @@ func (d *Downloader) MediaPath(dir string, id uint64, file string) string {
 		return filepath.Join(dir, file)
 	}
 	return filepath.Join(dir, name, file)
+}
+
+// RevealPath returns the absolute path of the first downloaded file for save id (for Finder reveal).
+func (d *Downloader) RevealPath(dir string, id uint64) string {
+	files := d.MediaFiles(dir, id)
+	if len(files) == 0 {
+		return ""
+	}
+	return d.MediaPath(dir, id, files[0])
 }
 
 // Download fetches every photo/video of the post at url into dir for save id, replacing any earlier download.

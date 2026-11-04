@@ -88,7 +88,7 @@
       @if (addError()) {
         <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
-      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), or import a .txt file. Each URL is saved separately.</p>
+      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), import a .txt file, or drop a screenshot onto the board.</p>
     </div>
   } @else {
       <!-- Folder / Bin header: title + count, per-row switch, Add link or Empty Bin -->
@@ -148,8 +148,29 @@
     </div>
   }
 
-  <!-- Content: on Home a centered column like Shopify's home feed -->
-  <div [class]="folderId() === null && !isBin() ? 'mx-auto mt-[72px] max-w-[936px] px-0.5' : ''">
+  <!-- Content: on Home a centered column like Shopify's home feed. Image drops create cards. -->
+  <div
+    class="relative"
+    [class]="folderId() === null && !isBin() ? 'mx-auto mt-[72px] max-w-[936px] px-0.5' : ''"
+    (dragenter)="onFileDragEnter($event)"
+    (dragover)="onFileDragOver($event)"
+    (dragleave)="onFileDragLeave($event)"
+    (drop)="onFileDrop($event)">
+  @if (fileDragOver() && !isBin()) {
+    <div
+      class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-blue-500 bg-blue-500/10 dark:bg-blue-500/15"
+      aria-hidden="true">
+      <p class="rounded-xl bg-white/95 dark:bg-slate-900/95 px-4 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 shadow-md">
+        Drop image to add
+      </p>
+    </div>
+  }
+  @if (uploading()) {
+    <p class="mb-3 text-sm text-ink-secondary dark:text-slate-400" role="status">Adding image…</p>
+  }
+  @if (addError() && folderId() !== null) {
+    <p class="mb-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
+  }
   @if (!isLoggedIn()) {
     @if (sessionStatus() === 'error') {
       <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-6 text-center" role="alert">
@@ -184,7 +205,7 @@
           <p class="text-sm text-slate-500 dark:text-slate-400">Paste a link above to save your first reel.</p>
         } @else {
           <p class="mt-2 font-semibold">This folder is empty</p>
-          <p class="text-sm text-slate-500 dark:text-slate-400">Drag cards here from Home, or paste a link above.</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Drag cards here from Home, paste a link, or drop a screenshot.</p>
         }
       }
     </div>
@@ -298,9 +319,9 @@
   </div>
 </ng-template>
 
-<!-- Save details popup -->
+<!-- Save details popup (standard size; media preview fits inside) -->
 @if (detailsSave(); as save) {
-  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[18vh]" role="dialog" aria-modal="true" aria-labelledby="save-details-title">
+  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[12vh]" role="dialog" aria-modal="true" aria-labelledby="save-details-title">
     <div class="absolute inset-0 bg-black/60" (click)="closeDetails()"></div>
     <div class="relative w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-slate-900 dark:text-slate-100 shadow-xl">
       <div class="flex items-start justify-between gap-4">
@@ -309,11 +330,54 @@
           <span class="material-icons-outlined">close</span>
         </button>
       </div>
+
+      @if (save.download?.media?.length) {
+        <div class="mt-4 overflow-hidden rounded-xl bg-[#f5f6f7] dark:bg-black">
+          @if (save.download.media.length === 1) {
+            @if (save.download.media[0].type === 'image') {
+              <img
+                [src]="save.download.media[0].url"
+                alt="Preview"
+                class="mx-auto h-56 w-full object-contain" />
+            } @else {
+              <video
+                [src]="save.download.media[0].url"
+                controls
+                playsinline
+                class="mx-auto h-56 w-full object-contain"></video>
+            }
+          } @else {
+            <div class="mx-auto max-w-[200px]">
+              <app-media-carousel [media]="save.download.media" />
+            </div>
+          }
+        </div>
+      }
+
       <dl class="mt-4 space-y-3 text-sm">
         <div class="flex items-center justify-between gap-3">
           <dt class="text-slate-500 dark:text-slate-400">Source</dt>
-          <dd>
-            <span class="inline-flex px-1.5 py-0.5 rounded-md border border-[#e3e3e3] dark:border-slate-600 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
+          <dd class="flex items-center gap-1.5">
+            <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-md border border-[#e3e3e3] dark:border-slate-600 px-1.5 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
+            @if (!isLocal(save)) {
+              <a
+                [href]="save.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open link"
+                title="Open link"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#e3e3e3] dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400">
+                <span class="material-icons-outlined !text-base">open_in_new</span>
+              </a>
+              <button
+                type="button"
+                (click)="copyLink(save)"
+                [attr.aria-label]="copiedId() === save.id ? 'Copied' : 'Copy link'"
+                [title]="copiedId() === save.id ? 'Copied' : 'Copy link'"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#e3e3e3] dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400">
+                <span class="material-icons-outlined !text-base">{{ copiedId() === save.id ? 'check' : 'content_copy' }}</span>
+              </button>
+            }
           </dd>
         </div>
         <div class="flex items-center justify-between gap-3">
@@ -337,28 +401,26 @@
             }
           </dd>
         </div>
-        <div class="flex flex-col gap-1.5">
-          <dt class="text-slate-500 dark:text-slate-400">Link</dt>
-          <dd class="break-all rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs text-slate-700 dark:text-slate-300">{{ save.url }}</dd>
-        </div>
+        @if (save.download?.path; as path) {
+          <div class="flex flex-col gap-1.5">
+            <dt class="text-slate-500 dark:text-slate-400">Location</dt>
+            <dd>
+              <button
+                type="button"
+                (click)="revealInFinder(save)"
+                [disabled]="revealingId() === save.id"
+                [title]="'Open in Finder'"
+                class="flex w-full items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2.5 text-left text-xs leading-5 text-blue-600 dark:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:underline disabled:opacity-60">
+                <span class="material-icons-outlined !text-[18px] !leading-none shrink-0">folder_open</span>
+                <span class="min-w-0 flex-1 break-all">{{ path }}</span>
+              </button>
+              @if (revealError()) {
+                <p class="mt-1 text-[11px] text-red-600 dark:text-red-400" role="alert">{{ revealError() }}</p>
+              }
+            </dd>
+          </div>
+        }
       </dl>
-      <div class="mt-5 flex flex-wrap items-center justify-end gap-2">
-        <a
-          [href]="save.url"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
-          <span class="material-icons-outlined !text-base">open_in_new</span>
-          Open link
-        </a>
-        <button
-          type="button"
-          (click)="copyLink(save)"
-          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
-          <span class="material-icons-outlined !text-base">{{ copiedId() === save.id ? 'check' : 'content_copy' }}</span>
-          {{ copiedId() === save.id ? 'Copied' : 'Copy link' }}
-        </button>
-      </div>
     </div>
   </div>
 }

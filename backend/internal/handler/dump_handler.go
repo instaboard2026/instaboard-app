@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -53,12 +56,13 @@ func NewDumpHandler(repo *repository.SaveRepo, settings *repository.SettingsRepo
 	return &DumpHandler{repo: repo, settings: settings, downloader: downloader, media: media, defaultDir: defaultDir, cookiesBrowser: cookiesBrowser}
 }
 
-// withMedia adds signed URLs for the save's downloaded files to its download state.
+// withMedia adds signed URLs and the on-disk path for the save's downloaded files.
 func (h *DumpHandler) withMedia(userID int64, dir string, saveID uint64, state *service.DownloadState) *service.DownloadState {
 	if state == nil {
 		return nil
 	}
 	state.Media = h.media.Items(userID, saveID, h.downloader.MediaFiles(dir, saveID))
+	state.Path = h.downloader.RevealPath(dir, saveID)
 	return state
 }
 
@@ -132,6 +136,7 @@ func (h *DumpHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		service.SourceInstagram: 0,
 		service.SourceYouTube:   0,
 		service.SourcePinterest: 0,
+		service.SourceLocal:     0,
 	}}
 	for _, s := range saves {
 		if h.downloader.Status(dir, s.ID) == nil {
@@ -281,6 +286,55 @@ func (h *DumpHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.WriteSuccess(w, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
+}
+
+// RevealInFinder opens the downloaded file for this save in Finder (macOS) or the file manager.
+func (h *DumpHandler) RevealInFinder(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "invalid save id", nil)
+		return
+	}
+	if _, err := h.repo.Get(r.Context(), userID, id); errors.Is(err, repository.ErrSaveNotFound) {
+		utils.WriteError(w, http.StatusNotFound, "save not found", nil)
+		return
+	} else if err != nil {
+		slog.Error("get save for reveal failed", "user_id", userID, "save_id", id, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to load save", nil)
+		return
+	}
+	dir, _ := h.downloadDir(r, userID)
+	path := h.downloader.RevealPath(dir, id)
+	if path == "" {
+		utils.WriteError(w, http.StatusNotFound, "no downloaded file to open", nil)
+		return
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		utils.WriteError(w, http.StatusNotFound, "file is missing on disk", nil)
+		return
+	}
+	if err := revealInFileManager(path); err != nil {
+		slog.Error("reveal in finder failed", "path", path, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "could not open File Explorer", nil)
+		return
+	}
+	utils.WriteSuccess(w, map[string]string{"path": path})
+}
+
+func revealInFileManager(path string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", "-R", path).Start()
+	case "windows":
+		return exec.Command("explorer", "/select,", path).Start()
+	default:
+		return exec.Command("xdg-open", filepath.Dir(path)).Start()
+	}
 }
 
 // DownloadsInfo returns the user's download folder and whether the download tools are installed.

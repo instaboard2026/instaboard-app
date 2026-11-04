@@ -4,7 +4,7 @@ import { Observable, catchError, map, of, tap, throwError } from 'rxjs';
 import { environment } from 'environments';
 import { AuthTokenService } from './auth-token.service';
 
-export type SaveSource = 'instagram' | 'pinterest' | 'youtube';
+export type SaveSource = 'instagram' | 'pinterest' | 'youtube' | 'local';
 
 /** One downloaded file with a signed, expiring URL the browser can load directly. */
 export interface SaveMedia {
@@ -18,6 +18,8 @@ export interface SaveDownload {
   files: number;
   /** In display order; empty if the files couldn't be listed. */
   media?: SaveMedia[];
+  /** Absolute path on this computer (click to reveal in Finder). */
+  path?: string;
 }
 
 /** One saved link from GET/POST /api/dump (matches backend saveResponse). */
@@ -165,6 +167,76 @@ export class DumpService {
         return throwError(() => new Error(capitalize(message)));
       })
     );
+  }
+
+  /**
+   * Uploads local images into Home or a folder (one card per file, already previewable).
+   * Field name must be `file` (repeatable). Bin is not supported.
+   */
+  upload(files: File[], scope: SaveScope = 'dump'): Observable<Save[]> {
+    if (scope === 'bin') {
+      return throwError(() => new Error('Drop images on Home or a folder, not the Bin.'));
+    }
+    const list = files.filter((f) => f && f.size > 0);
+    if (!list.length) {
+      return throwError(() => new Error('Drop one or more image files.'));
+    }
+    const headers = this.authHeaders();
+    if (!headers) {
+      return throwError(() => new Error('Please sign in to save images.'));
+    }
+    const form = new FormData();
+    for (const f of list) {
+      form.append('file', f, f.name || 'image');
+    }
+    const path =
+      scope === 'dump' ? '/api/dump/upload' : `/api/folders/${scope}/saves/upload`;
+    return this.http.post<ApiWrapper<Save[]>>(`${environment.apiUrl}${path}`, form, { headers }).pipe(
+      map((res) => {
+        if (res?.status !== 'SUCCESS' || !Array.isArray(res.data)) {
+          throw new Error(res?.message || 'Could not save those images.');
+        }
+        return res.data;
+      }),
+      tap((saves) => {
+        // Backend inserts each at the front; reverse so the first dropped file stays first.
+        for (const save of [...saves].reverse()) {
+          this.putSave(save, scope);
+        }
+      }),
+      catchError((err: unknown) => {
+        const message =
+          err instanceof HttpErrorResponse
+            ? err.error?.message || 'Could not save those images. Please try again.'
+            : (err as Error)?.message || 'Could not save those images.';
+        return throwError(() => new Error(capitalize(message)));
+      })
+    );
+  }
+
+  /** Opens the downloaded file in Finder (macOS) / File Explorer. */
+  reveal(id: number): Observable<{ path: string }> {
+    const headers = this.authHeaders();
+    if (!headers) {
+      return throwError(() => new Error('Please sign in.'));
+    }
+    return this.http
+      .post<ApiWrapper<{ path: string }>>(`${environment.apiUrl}/api/dump/${id}/reveal`, null, { headers })
+      .pipe(
+        map((res) => {
+          if (res?.status !== 'SUCCESS' || !res.data?.path) {
+            throw new Error(res?.message || 'Could not open that location.');
+          }
+          return res.data;
+        }),
+        catchError((err: unknown) => {
+          const message =
+            err instanceof HttpErrorResponse
+              ? err.error?.message || 'Could not open that location.'
+              : (err as Error)?.message || 'Could not open that location.';
+          return throwError(() => new Error(capitalize(message)));
+        })
+      );
   }
 
   /** Downloads a saved Instagram reel/post into the download folder on this computer (can take a while). */
