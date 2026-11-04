@@ -6,7 +6,7 @@ stored on your machine; there is no account or cloud.
 
 ## Download (macOS)
 
-1. Grab the latest **Instaboard-mac.zip** from [Releases](https://github.com/instaboard2026/instaboard/releases).
+1. Grab the latest **Instaboard-mac.zip** from [Releases](https://github.com/instaboard2026/instaboard-app/releases).
 2. Unzip, then double-click **Instaboard** (or run `./Instaboard` in Terminal).
 3. Your browser opens to `http://127.0.0.1:8788`. Keep that window open while you use the app.
 
