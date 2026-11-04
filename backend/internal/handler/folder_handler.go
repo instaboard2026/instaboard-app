@@ -34,6 +34,10 @@ type folderOrderRequest struct {
 	IDs []int64 `json:"ids"`
 }
 
+type saveOrderRequest struct {
+	IDs []uint64 `json:"ids"`
+}
+
 type moveSaveRequest struct {
 	// FolderID nil moves the save back to the Dump.
 	FolderID *int64 `json:"folder_id"`
@@ -71,7 +75,7 @@ func writeFolderError(w http.ResponseWriter, err error, action string, userID in
 		utils.WriteError(w, http.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, repository.ErrFolderNameTaken):
 		utils.WriteError(w, http.StatusConflict, err.Error(), nil)
-	case errors.Is(err, repository.ErrFolderNameInvalid), errors.Is(err, repository.ErrTooManyFolders), errors.Is(err, repository.ErrFolderOrder):
+	case errors.Is(err, repository.ErrFolderNameInvalid), errors.Is(err, repository.ErrTooManyFolders), errors.Is(err, repository.ErrFolderOrder), errors.Is(err, repository.ErrSaveOrder):
 		utils.WriteError(w, http.StatusBadRequest, err.Error(), nil)
 	default:
 		slog.Error(action+" failed", "user_id", userID, "err", err)
@@ -193,6 +197,26 @@ func (h *FolderHandler) AddSave(w http.ResponseWriter, r *http.Request) {
 	h.dump.addLink(w, r, userID, &id)
 }
 
+// ReorderSaves sets the board order of saves in a folder.
+func (h *FolderHandler) ReorderSaves(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := userAndID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req saveOrderRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if writeFolderError(w, h.saves.ReorderFolder(r.Context(), userID, id, req.IDs), "reorder folder saves", userID) {
+		return
+	}
+	saves, err := h.saves.ListByFolder(r.Context(), userID, id)
+	if writeFolderError(w, err, "list folder saves", userID) {
+		return
+	}
+	utils.WriteSuccess(w, h.dump.saveViews(r, userID, saves))
+}
+
 // MoveSave moves a save into a folder, or back to the Dump when folder_id is null.
 func (h *FolderHandler) MoveSave(w http.ResponseWriter, r *http.Request) {
 	userID, id, ok := userAndID(w, r, "id")
@@ -205,6 +229,67 @@ func (h *FolderHandler) MoveSave(w http.ResponseWriter, r *http.Request) {
 	}
 	save, err := h.saves.Move(r.Context(), userID, uint64(id), req.FolderID)
 	if writeFolderError(w, err, "move save", userID) {
+		return
+	}
+	dir, _ := h.dump.downloadDir(r, userID)
+	utils.WriteSuccess(w, h.dump.saveView(userID, dir, *save))
+}
+
+// DeleteSave moves a save into the Bin (soft-delete). Downloaded files stay until the Bin is emptied.
+func (h *FolderHandler) DeleteSave(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := userAndID(w, r, "id")
+	if !ok {
+		return
+	}
+	save, err := h.saves.SoftDelete(r.Context(), userID, uint64(id))
+	if writeFolderError(w, err, "move save to bin", userID) {
+		return
+	}
+	dir, _ := h.dump.downloadDir(r, userID)
+	utils.WriteSuccess(w, h.dump.saveView(userID, dir, *save))
+}
+
+// ListBin returns soft-deleted saves in the Bin.
+func (h *FolderHandler) ListBin(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := userAndID(w, r, "")
+	if !ok {
+		return
+	}
+	saves, err := h.saves.ListBin(r.Context(), userID)
+	if writeFolderError(w, err, "list bin", userID) {
+		return
+	}
+	utils.WriteSuccess(w, h.dump.saveViews(r, userID, saves))
+}
+
+// ClearBin permanently deletes every save in the Bin and removes their downloaded files from disk.
+func (h *FolderHandler) ClearBin(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := userAndID(w, r, "")
+	if !ok {
+		return
+	}
+	saves, err := h.saves.ClearBin(r.Context(), userID)
+	if writeFolderError(w, err, "empty bin", userID) {
+		return
+	}
+	for _, s := range saves {
+		h.dump.removeDownloadFiles(r, userID, s.ID)
+	}
+	utils.WriteSuccess(w, map[string]int{"deleted": len(saves)})
+}
+
+// RestoreSave takes a save out of the Bin into folder_id (null = Dump).
+func (h *FolderHandler) RestoreSave(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := userAndID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req moveSaveRequest
+	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	save, err := h.saves.Restore(r.Context(), userID, uint64(id), req.FolderID)
+	if writeFolderError(w, err, "restore save", userID) {
 		return
 	}
 	dir, _ := h.dump.downloadDir(r, userID)

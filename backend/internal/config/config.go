@@ -25,12 +25,14 @@ type Config struct {
 }
 
 // Load reads configuration from environment variables; every value has a working default.
+// Dev default: API on :8788 with Angular at :5200. Packaged builds (embedded UI) listen on :4200
+// instead — see main.go — so users open http://localhost:4200/home.
 func Load() *Config {
 	port, err := strconv.Atoi(getEnv("PORT", "8788"))
 	if err != nil {
 		port = 8788
 	}
-	corsHost := getEnv("CORS_ORIGIN", "http://localhost:5281")
+	corsHost := getEnv("CORS_ORIGIN", "http://localhost:5200")
 
 	backendURL := strings.TrimSuffix(getEnv("BACKEND_PUBLIC_URL", fmt.Sprintf("http://localhost:%d", port)), "/")
 

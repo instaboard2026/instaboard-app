@@ -126,6 +126,53 @@ func TestSaveRepo(t *testing.T) {
 	}
 }
 
+func TestSaveReorder(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	folders := NewFolderRepo(db)
+	saves := NewSaveRepo(db)
+	u := createUser(t, db, "ord@example.com")
+	folder, _ := folders.Create(ctx, u.ID, "Looks")
+
+	a, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/a", "instagram", "web", &folder.ID)
+	b, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/b", "instagram", "web", &folder.ID)
+	c, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/c", "instagram", "web", &folder.ID)
+	// Newest insert is at the front: c, b, a
+	list, _ := saves.ListByFolder(ctx, u.ID, folder.ID)
+	if len(list) != 3 || list[0].ID != c.ID || list[1].ID != b.ID || list[2].ID != a.ID {
+		t.Fatalf("initial order = %+v", list)
+	}
+
+	if err := saves.ReorderFolder(ctx, u.ID, folder.ID, []uint64{a.ID, c.ID, b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = saves.ListByFolder(ctx, u.ID, folder.ID)
+	if len(list) != 3 || list[0].ID != a.ID || list[1].ID != c.ID || list[2].ID != b.ID {
+		t.Fatalf("order after reorder = %+v", list)
+	}
+
+	dumpA, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/d1", "instagram", "web", nil)
+	dumpB, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/d2", "instagram", "web", nil)
+	if err := saves.ReorderDump(ctx, u.ID, []uint64{dumpA.ID, dumpB.ID}); err != nil {
+		t.Fatal(err)
+	}
+	dump, _ := saves.ListDump(ctx, u.ID)
+	if len(dump) != 2 || dump[0].ID != dumpA.ID || dump[1].ID != dumpB.ID {
+		t.Fatalf("dump order = %+v", dump)
+	}
+
+	for _, bad := range [][]uint64{
+		{a.ID, b.ID},             // missing one
+		{a.ID, b.ID, b.ID},       // duplicate
+		{a.ID, b.ID, c.ID, 99},   // unknown
+		{a.ID, b.ID, dumpA.ID},   // dump item in folder order
+	} {
+		if err := saves.ReorderFolder(ctx, u.ID, folder.ID, bad); !errors.Is(err, ErrSaveOrder) {
+			t.Errorf("ReorderFolder(%v) err = %v, want ErrSaveOrder", bad, err)
+		}
+	}
+}
+
 func TestSettingsRepo(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http
 import { Observable, catchError, map, of, tap, throwError } from 'rxjs';
 import { environment } from 'environments';
 import { AuthTokenService } from './auth-token.service';
-import { DumpService, Save, SaveScope } from './dump.service';
+import { DumpService, MoveTarget, Save, SaveScope } from './dump.service';
 
 /** One folder from GET /api/folders. */
 export interface Folder {
@@ -112,12 +112,12 @@ export class FoldersService {
    * Moves a save into a folder or back to the Dump (optimistic). The card leaves its current list
    * immediately and counts update; everything is restored if the server rejects the move.
    */
-  moveSave(save: Save, to: SaveScope): void {
+  moveSave(save: Save, to: MoveTarget): void {
     const toFolderId = to === 'dump' ? null : to;
-    if (save.folder_id === toFolderId) return;
+    if (save.folder_id === toFolderId && !save.deleted_at) return;
 
     const from = this.dump.takeSave(save.id) ?? (save.folder_id ?? 'dump');
-    const moved: Save = { ...save, folder_id: toFolderId };
+    const moved: Save = { ...save, folder_id: toFolderId, deleted_at: null };
     this.dump.putSave(moved, to);
     this.adjustCount(from, -1);
     this.adjustCount(to, +1);
@@ -134,6 +134,60 @@ export class FoldersService {
     });
   }
 
+  /**
+   * Moves a save into the Bin (soft-delete, optimistic). Downloaded files stay until the Bin is emptied.
+   */
+  deleteSave(save: Save): void {
+    if (save.deleted_at) return;
+    const from = this.dump.takeSave(save.id) ?? (save.folder_id ?? 'dump');
+    this.adjustCount(from, -1);
+
+    this.request<Save>('DELETE', `/api/saves/${save.id}`).subscribe({
+      next: (updated) => this.dump.putSave(updated, 'bin'),
+      error: (err: Error) => {
+        this.dump.putSave(save, from);
+        this.adjustCount(from, +1);
+        this.showNotice(`Couldn't move that item to the Bin. ${err.message}`);
+      },
+    });
+  }
+
+  /**
+   * Restores a binned save into the Dump or a folder (optimistic).
+   */
+  restoreSave(save: Save, to: MoveTarget): void {
+    const toFolderId = to === 'dump' ? null : to;
+    this.dump.takeSave(save.id);
+    const restored: Save = { ...save, folder_id: toFolderId, deleted_at: null };
+    this.dump.putSave(restored, to);
+    this.adjustCount(to, +1);
+
+    this.request<Save>('POST', `/api/saves/${save.id}/restore`, { folder_id: toFolderId }).subscribe({
+      next: (updated) => this.dump.replaceSave(updated),
+      error: (err: Error) => {
+        this.dump.takeSave(save.id);
+        this.dump.putSave(save, 'bin');
+        this.adjustCount(to, -1);
+        this.showNotice(`Couldn't restore that item. ${err.message}`);
+      },
+    });
+  }
+
+  /**
+   * Permanently deletes every save in the Bin and their downloaded files (optimistic).
+   */
+  clearBin(): void {
+    const before = this.dump.listFor('bin');
+    this.dump.replaceList('bin', []);
+
+    this.request<{ deleted: number }>('DELETE', '/api/bin').subscribe({
+      error: (err: Error) => {
+        this.dump.replaceList('bin', before);
+        this.showNotice(`Couldn't empty the Bin. ${err.message}`);
+      },
+    });
+  }
+
   showNotice(message: string): void {
     this.notice.set(message);
     if (this.noticeTimer) clearTimeout(this.noticeTimer);
@@ -141,7 +195,7 @@ export class FoldersService {
   }
 
   private adjustCount(scope: SaveScope, delta: number): void {
-    if (scope === 'dump') return; // the Dump badge is the length of the Dump list
+    if (scope === 'dump' || scope === 'bin') return; // badges are the length of those lists
     this.folders.update((list) => list.map((f) => (f.id === scope ? { ...f, count: Math.max(0, f.count + delta) } : f)));
   }
 

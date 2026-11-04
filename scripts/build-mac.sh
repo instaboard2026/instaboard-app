@@ -54,7 +54,7 @@ cat > "$OUT/README.txt" <<EOF
 Instaboard ${VERSION}
 
 1. Double-click Instaboard (or run it from Terminal: ./Instaboard).
-2. Your browser opens to http://127.0.0.1:8788 — keep the Instaboard window open while you use it.
+2. Your browser opens to http://localhost:4200/home — keep the Instaboard window open while you use it.
 3. Use Restart / Quit beside the Instaboard name in the footer, or press Ctrl+C in that window.
 
 First launch on macOS: if Gatekeeper blocks it, right-click Instaboard → Open → Open.

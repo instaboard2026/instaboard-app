@@ -82,6 +82,15 @@ const FALLBACK_RELEASES = 'https://github.com/instaboard2026/instaboard-app/rele
                 {{ updates.applying() ? 'Updating…' : 'Update and restart' }}
               </button>
             }
+            @if (info.latest) {
+              <button
+                type="button"
+                (click)="updates.reinstallLatest()"
+                [disabled]="updates.busy()"
+                class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60">
+                {{ updates.applying() ? 'Reinstalling…' : 'Reinstall latest' }}
+              </button>
+            }
           </div>
 
           @if (updates.applying()) {

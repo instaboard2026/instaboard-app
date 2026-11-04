@@ -1,7 +1,7 @@
 <div
   class="w-full max-w-screen-2xl mx-auto text-ink dark:text-slate-100"
-  [class]="folderId() === null ? 'px-2 pt-2 pb-10' : 'px-4 sm:px-6 py-6'">
-  @if (folderId() === null) {
+  [class]="folderId() === null && !isBin() ? 'px-2 pt-2 pb-10' : 'px-4 sm:px-6 py-6'">
+  @if (folderId() === null && !isBin()) {
     <!-- Home: metric strip (Shopify-style: totals left, sources centered, right kept empty) -->
     @if (isLoggedIn()) {
       <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-start gap-y-1 px-2 pt-2 pb-1">
@@ -31,17 +31,16 @@
       <form
         class="mt-8 rounded-[26px] bg-white dark:bg-card-bg p-3.5 text-left shadow-prompt dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
         (ngSubmit)="addLink()">
-        <input
+        <textarea
           #homeLinkInput
-          type="text"
-          inputmode="url"
           name="link"
+          rows="3"
           [ngModel]="linkInput()"
           (ngModelChange)="linkInput.set($event); addError.set(null)"
-          placeholder="Paste an Instagram, Pinterest or YouTube link…"
+          placeholder="Paste one or many Instagram, Pinterest or YouTube links…"
           autocomplete="off"
-          aria-label="Link to save"
-          class="w-full border-0 bg-transparent px-0.5 pt-0.5 pb-3 text-sm text-ink dark:text-white placeholder:text-ink-placeholder outline-none shadow-none focus:border-0 focus:outline-none focus:ring-0" />
+          aria-label="Links to save"
+          class="w-full resize-y min-h-[4.5rem] border-0 bg-transparent px-0.5 pt-0.5 pb-3 text-sm text-ink dark:text-white placeholder:text-ink-placeholder outline-none shadow-none focus:border-0 focus:outline-none focus:ring-0"></textarea>
         <div class="flex items-center gap-2">
           <span class="hidden sm:inline-flex items-center gap-2 pl-0.5" role="img" aria-label="Supports Instagram, Pinterest and YouTube">
             <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="#E4405F" stroke-width="2" aria-hidden="true">
@@ -61,6 +60,13 @@
             </svg>
           </span>
           <div class="ml-auto flex items-center gap-1">
+            <label
+              class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg px-2 text-sm font-medium text-ink dark:text-slate-200 hover:bg-surface-hover dark:hover:bg-slate-800"
+              title="Import links from a .txt or .csv file">
+              <span class="material-icons-outlined !text-base">upload_file</span>
+              File
+              <input type="file" accept=".txt,.csv,text/plain" class="sr-only" (change)="onLinksFile($event)" />
+            </label>
             <button
               type="button"
               (click)="pasteFromClipboard(homeLinkInput)"
@@ -71,8 +77,8 @@
             <button
               type="submit"
               [disabled]="adding() || !linkInput().trim()"
-              [attr.aria-label]="adding() ? 'Saving' : 'Save link'"
-              [title]="adding() ? 'Saving…' : 'Save link'"
+              [attr.aria-label]="adding() ? 'Saving' : 'Save links'"
+              [title]="adding() ? 'Saving…' : 'Save links'"
               class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white dark:bg-white dark:text-ink transition hover:opacity-90 disabled:opacity-25 disabled:cursor-not-allowed">
               <span class="material-icons-outlined !text-lg" [class.animate-spin]="adding()">{{ adding() ? 'progress_activity' : 'arrow_upward' }}</span>
             </button>
@@ -82,14 +88,16 @@
       @if (addError()) {
         <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
-      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Reels you share from your phone land here too. Download the ones you want, or drag them into a folder.</p>
+      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), or import a .txt file. Each URL is saved separately.</p>
     </div>
   } @else {
-      <!-- Folder header: title + count, per-row switch, Add link -->
+      <!-- Folder / Bin header: title + count, per-row switch, Add link or Empty Bin -->
     <div class="flex items-center justify-between gap-4 mb-5">
       <div class="flex items-baseline gap-3">
         <h1 class="flex min-w-0 items-center gap-2 text-xl font-semibold">
-          @if (folderId() !== null) {
+          @if (isBin()) {
+            <img src="/icons/bin.png" alt="" width="28" height="32" class="select-none" draggable="false" />
+          } @else if (folderId() !== null) {
             <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">folder</span>
           }
           <span class="truncate">{{ heading() }}</span>
@@ -119,7 +127,15 @@
           </button>
         }
       </div>
-      @if (folderId() !== null && isLoggedIn()) {
+      @if (isBin() && isLoggedIn() && count() > 0) {
+        <button
+          type="button"
+          (click)="emptyBin()"
+          class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] bg-red-600 hover:bg-red-500 text-white text-sm font-semibold whitespace-nowrap transition-colors">
+          <span class="material-icons-outlined !text-lg">delete_forever</span>
+          Empty Bin
+        </button>
+      } @else if (folderId() !== null && isLoggedIn()) {
         <button
           type="button"
           (click)="openAddDialog()"
@@ -133,7 +149,7 @@
   }
 
   <!-- Content: on Home a centered column like Shopify's home feed -->
-  <div [class]="folderId() === null ? 'mx-auto mt-[72px] max-w-[936px] px-0.5' : ''">
+  <div [class]="folderId() === null && !isBin() ? 'mx-auto mt-[72px] max-w-[936px] px-0.5' : ''">
   @if (!isLoggedIn()) {
     @if (sessionStatus() === 'error') {
       <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-6 text-center" role="alert">
@@ -157,19 +173,28 @@
     </div>
   } @else if (saves().length === 0) {
     <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center">
-      <span class="material-icons-outlined !text-4xl text-slate-400">inbox</span>
-      @if (folderId() === null) {
-        <p class="mt-2 font-semibold">Nothing here yet</p>
-        <p class="text-sm text-slate-500 dark:text-slate-400">Paste a link above to save your first reel.</p>
+      @if (isBin()) {
+        <img src="/icons/bin.png" alt="" width="56" height="64" class="mx-auto select-none opacity-80" draggable="false" />
+        <p class="mt-2 font-semibold">Bin is empty</p>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Drag reels onto the Bin in the sidebar to move them here.</p>
       } @else {
-        <p class="mt-2 font-semibold">This folder is empty</p>
-        <p class="text-sm text-slate-500 dark:text-slate-400">Drag cards here from Home, or paste a link above.</p>
+        <span class="material-icons-outlined !text-4xl text-slate-400">inbox</span>
+        @if (folderId() === null) {
+          <p class="mt-2 font-semibold">Nothing here yet</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Paste a link above to save your first reel.</p>
+        } @else {
+          <p class="mt-2 font-semibold">This folder is empty</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Drag cards here from Home, or paste a link above.</p>
+        }
       }
     </div>
   } @else {
     <div
       cdkDropList
-      cdkDropListSortingDisabled
+      cdkDropListOrientation="mixed"
+      [cdkDropListSortingDisabled]="isBin()"
+      [cdkDropListData]="saves()"
+      (cdkDropListDropped)="onCardDropped($event)"
       class="grid gap-4"
       [class]="gridClass()"
       [style.--per-row]="perRow()">
@@ -196,8 +221,14 @@
 
 <ng-template #saveCard let-save>
   <div class="min-w-0 flex flex-col gap-2">
-    <!-- Card surface: Shopify's layered shadow, lifting slightly on hover. -->
-    <div class="overflow-hidden rounded-2xl shadow-card transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-card-hover dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+    <!-- Card surface: Shopify's layered shadow, lifting slightly on hover. Scheduled: blue ring. -->
+    <div
+      class="overflow-hidden rounded-2xl shadow-card transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-card-hover dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+      [class.ring-2]="calendarSchedule.bySave().has(save.id)"
+      [class.ring-blue-500]="calendarSchedule.bySave().has(save.id)"
+      [class.ring-offset-2]="calendarSchedule.bySave().has(save.id)"
+      [class.ring-offset-white]="calendarSchedule.bySave().has(save.id)"
+      [class.dark:ring-offset-primary-bg]="calendarSchedule.bySave().has(save.id)">
     @if (save.download?.media?.length) {
       <!-- Instagram reel shape (9:16). Carousels swipe sideways. -->
       <app-media-carousel [media]="save.download.media" />
@@ -229,36 +260,13 @@
       </div>
     }
     </div>
-    <div class="flex min-w-0 items-center gap-2 px-0.5 text-xs">
-      <span class="shrink-0 px-1.5 py-0.5 rounded-md border border-[#e3e3e3] dark:border-slate-600 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
-      <span class="min-w-0 truncate text-ink-secondary dark:text-slate-400">From {{ addedFrom(save) }} · {{ timeAgo(save) }}</span>
-      <span class="ml-auto shrink-0 inline-flex items-center gap-0.5">
-        <a
-          [href]="save.url"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open link"
-          aria-label="Open link"
-          class="inline-flex p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-slate-800">
-          <span class="material-icons-outlined !text-base">open_in_new</span>
-        </a>
-        <button
-          type="button"
-          (click)="copyLink(save)"
-          [title]="copiedId() === save.id ? 'Copied' : 'Copy link'"
-          [attr.aria-label]="copiedId() === save.id ? 'Link copied' : 'Copy link'"
-          class="inline-flex p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-slate-800">
-          <span class="material-icons-outlined !text-base" [class.!text-green-600]="copiedId() === save.id">{{ copiedId() === save.id ? 'check' : 'content_copy' }}</span>
-        </button>
-        @if (save.download) {
-          <span class="ml-1 inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400">
-            <span class="material-icons-outlined !text-sm">check_circle</span>
-            {{ downloadLabel(save) }}
-          </span>
-        } @else {
-          <span class="ml-1 text-slate-500 dark:text-slate-400">Not downloaded</span>
-        }
-      </span>
+    <div class="px-0.5">
+      <button
+        type="button"
+        (click)="openDetails(save); $event.stopPropagation()"
+        class="text-xs font-medium text-ink-secondary dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
+        Show details
+      </button>
     </div>
   </div>
 </ng-template>
@@ -290,6 +298,71 @@
   </div>
 </ng-template>
 
+<!-- Save details popup -->
+@if (detailsSave(); as save) {
+  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[18vh]" role="dialog" aria-modal="true" aria-labelledby="save-details-title">
+    <div class="absolute inset-0 bg-black/60" (click)="closeDetails()"></div>
+    <div class="relative w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 text-slate-900 dark:text-slate-100 shadow-xl">
+      <div class="flex items-start justify-between gap-4">
+        <h2 id="save-details-title" class="text-lg font-bold">Details</h2>
+        <button type="button" (click)="closeDetails()" aria-label="Close" class="-m-1 p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <span class="material-icons-outlined">close</span>
+        </button>
+      </div>
+      <dl class="mt-4 space-y-3 text-sm">
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-slate-500 dark:text-slate-400">Source</dt>
+          <dd>
+            <span class="inline-flex px-1.5 py-0.5 rounded-md border border-[#e3e3e3] dark:border-slate-600 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-slate-500 dark:text-slate-400">Added from</dt>
+          <dd class="font-medium">{{ addedFrom(save) }}</dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-slate-500 dark:text-slate-400">Saved</dt>
+          <dd class="font-medium">{{ timeAgo(save) }}</dd>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <dt class="text-slate-500 dark:text-slate-400">Download</dt>
+          <dd>
+            @if (save.download) {
+              <span class="inline-flex items-center gap-1 font-medium text-green-700 dark:text-green-400">
+                <span class="material-icons-outlined !text-sm">check_circle</span>
+                {{ downloadLabel(save) }}
+              </span>
+            } @else {
+              <span class="text-slate-500 dark:text-slate-400">Not downloaded</span>
+            }
+          </dd>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <dt class="text-slate-500 dark:text-slate-400">Link</dt>
+          <dd class="break-all rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs text-slate-700 dark:text-slate-300">{{ save.url }}</dd>
+        </div>
+      </dl>
+      <div class="mt-5 flex flex-wrap items-center justify-end gap-2">
+        <a
+          [href]="save.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">
+          <span class="material-icons-outlined !text-base">open_in_new</span>
+          Open link
+        </a>
+        <button
+          type="button"
+          (click)="copyLink(save)"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">
+          <span class="material-icons-outlined !text-base">{{ copiedId() === save.id ? 'check' : 'content_copy' }}</span>
+          {{ copiedId() === save.id ? 'Copied' : 'Copy link' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}
+
 <!-- Add link popup (folder pages) -->
 @if (addDialogOpen()) {
   <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[18vh]" role="dialog" aria-modal="true" aria-labelledby="add-link-title">
@@ -303,28 +376,34 @@
           <span class="material-icons-outlined">close</span>
         </button>
       </div>
-      <input
+      <textarea
         appAutofocusSelect
-        type="text"
-        inputmode="url"
         name="dialogLink"
+        rows="4"
         [ngModel]="linkInput()"
         (ngModelChange)="linkInput.set($event); addError.set(null)"
-        placeholder="Paste an Instagram, Pinterest or YouTube link..."
+        placeholder="Paste one or many Instagram, Pinterest or YouTube links…"
         autocomplete="off"
-        class="mt-4 w-full h-12 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 text-base placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none" />
+        class="mt-4 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 text-base placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none resize-y"></textarea>
       @if (addError()) {
         <p class="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
-      <div class="mt-5 flex justify-end gap-2">
-        <button type="button" (click)="closeAddDialog()" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">Cancel</button>
-        <button
-          type="submit"
-          [disabled]="adding() || !linkInput().trim()"
-          class="px-4 py-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold">
-          <span class="material-icons-outlined !text-lg">add</span>
-          {{ adding() ? 'Adding…' : 'Add link' }}
-        </button>
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-2">
+        <label class="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 dark:text-slate-300 hover:underline">
+          <span class="material-icons-outlined !text-base">upload_file</span>
+          Import .txt
+          <input type="file" accept=".txt,.csv,text/plain" class="sr-only" (change)="onLinksFile($event)" />
+        </label>
+        <div class="flex gap-2">
+          <button type="button" (click)="closeAddDialog()" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800">Cancel</button>
+          <button
+            type="submit"
+            [disabled]="adding() || !linkInput().trim()"
+            class="px-4 py-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold">
+            <span class="material-icons-outlined !text-lg">add</span>
+            {{ adding() ? 'Adding…' : 'Add links' }}
+          </button>
+        </div>
       </div>
     </form>
   </div>

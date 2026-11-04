@@ -152,6 +152,16 @@ func (d *Downloader) MediaFiles(dir string, id uint64) []string {
 	return listFiles(filepath.Join(dir, name))
 }
 
+// RemoveFiles deletes a save's downloaded files from dir (<id>.mp4 and/or <id>/). Missing paths are fine.
+func (d *Downloader) RemoveFiles(dir string, id uint64) error {
+	name := strconv.FormatUint(id, 10)
+	_ = os.Remove(filepath.Join(dir, name+".mp4"))
+	if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+		return err
+	}
+	return nil
+}
+
 // DiskUsage returns the total size in bytes of a save's downloaded files in dir.
 func (d *Downloader) DiskUsage(dir string, id uint64) int64 {
 	name := strconv.FormatUint(id, 10)

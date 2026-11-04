@@ -1,7 +1,7 @@
 /**
- * App sidebar nav: Home (badge = links not in a folder) and the user's Folders (create with inline
- * rename, menu to rename / move / delete, drag to reorder). Home and folder rows are also drop targets
- * for cards dragged from a page (see CardDragService).
+ * App sidebar nav: Home (badge = links not in a folder), the user's Folders (create with inline
+ * rename, menu to rename / move / delete, drag to reorder), and a Bin. Home, folder rows, and the Bin
+ * are drop targets for cards (see CardDragService); dropping on Bin soft-deletes. Click Bin to open it.
  */
 import { Component, ChangeDetectionStrategy, HostListener, input, output, inject, effect, signal, untracked } from '@angular/core';
 import { CommonModule, NgTemplateOutlet } from '@angular/common';
@@ -146,7 +146,7 @@ export class SidebarComponent {
     this.foldersService.remove(folder.id).subscribe({
       next: () => {
         if (this.router.url.split('?')[0] === `/folders/${folder.id}`) {
-          this.router.navigate(['/dump']);
+          this.router.navigate(['/home']);
         }
       },
       error: () => {},
@@ -171,6 +171,15 @@ export class SidebarComponent {
 
   isActiveFolder(folder: Folder): boolean {
     return this.currentPath() === `/folders/${folder.id}`;
+  }
+
+  isActiveBin(): boolean {
+    return this.currentPath() === '/bin';
+  }
+
+  openBin(): void {
+    this.router.navigate(['/bin']);
+    this.onNavLinkClick();
   }
 
   /** Expanded sidebar (true) or icon rail (false); on phones, true = drawer over the page. */

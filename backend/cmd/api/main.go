@@ -59,6 +59,17 @@ func main() {
 	slog.Info("database ready", "path", cfg.DBPath, "migrations_applied", applied, "version", version)
 	defer db.Close()
 
+	embeddedUI := ui.HasUI()
+	if embeddedUI {
+		// Packaged app: UI + API on :4200 so users land on http://localhost:4200/home.
+		// Dev (no embed) keeps PORT default 8788. Explicit PORT= still wins.
+		if os.Getenv("PORT") == "" {
+			cfg.Port = 4200
+		}
+		cfg.BackendPublicURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
+		cfg.CORSHost = cfg.BackendPublicURL
+	}
+
 	userRepo := repository.NewUserRepo(db)
 	authSvc := service.NewAuthService(userRepo)
 	authHandler := handler.NewAuthHandler(cfg, authSvc)
@@ -69,13 +80,6 @@ func main() {
 	mediaSigner := service.NewMediaSigner(cfg.JWTSecret, cfg.BackendPublicURL, 24*time.Hour)
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
-	embeddedUI := ui.HasUI()
-	if embeddedUI {
-		// Same-origin UI — CORS origin matches the app URL (dev still uses CORS_ORIGIN).
-		if cfg.CORSHost == "http://localhost:5281" {
-			cfg.CORSHost = cfg.BackendPublicURL
-		}
-	}
 
 	var srv *http.Server
 	var restartAfter atomic.Bool
@@ -105,6 +109,7 @@ func main() {
 			r.Get("/dump", dumpHandler.GetDump)
 			r.Get("/stats", dumpHandler.Stats)
 			r.Post("/dump", dumpHandler.AddToDump)
+			r.Put("/dump/order", dumpHandler.Reorder)
 			r.Post("/dump/{id}/download", dumpHandler.Download)
 			r.Get("/folders", folderHandler.List)
 			r.Post("/folders", folderHandler.Create)
@@ -113,7 +118,12 @@ func main() {
 			r.Delete("/folders/{id}", folderHandler.Delete)
 			r.Get("/folders/{id}/saves", folderHandler.ListSaves)
 			r.Post("/folders/{id}/saves", folderHandler.AddSave)
+			r.Put("/folders/{id}/saves/order", folderHandler.ReorderSaves)
 			r.Patch("/saves/{id}", folderHandler.MoveSave)
+			r.Delete("/saves/{id}", folderHandler.DeleteSave)
+			r.Post("/saves/{id}/restore", folderHandler.RestoreSave)
+			r.Get("/bin", folderHandler.ListBin)
+			r.Delete("/bin", folderHandler.ClearBin)
 			r.Get("/downloads/info", dumpHandler.DownloadsInfo)
 			r.Post("/downloads/folder", dumpHandler.ChooseDownloadFolder)
 			r.Delete("/downloads/folder", dumpHandler.ResetDownloadFolder)
@@ -139,15 +149,21 @@ func main() {
 	}
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	url := fmt.Sprintf("http://%s", addr)
-	srv = &http.Server{Addr: addr, Handler: r}
-	if embeddedUI {
-		fmt.Fprintf(os.Stderr, "\n  Instaboard is running at %s\n  Keep this window open. Use Restart/Quit in the app, or press Ctrl+C.\n\n", url)
+	// Prefer localhost in the browser URL (friendlier than 127.0.0.1); still bind to loopback Host.
+	publicURL := cfg.BackendPublicURL
+	if publicURL == "" {
+		publicURL = fmt.Sprintf("http://localhost:%d", cfg.Port)
 	}
-	slog.Info("server starting", "addr", addr, "ui", embeddedUI)
+	srv = &http.Server{Addr: addr, Handler: r}
+	openURL := publicURL
+	if embeddedUI {
+		openURL = strings.TrimRight(publicURL, "/") + "/home"
+		fmt.Fprintf(os.Stderr, "\n  Instaboard is running at %s\n  Keep this window open. Use Restart/Quit in the app, or press Ctrl+C.\n\n", openURL)
+	}
+	slog.Info("server starting", "addr", addr, "ui", embeddedUI, "url", openURL)
 
 	if shouldOpenBrowser(embeddedUI) {
-		go openBrowser(url)
+		go openBrowser(openURL)
 	}
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

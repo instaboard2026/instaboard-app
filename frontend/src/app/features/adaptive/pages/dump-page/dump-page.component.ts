@@ -1,26 +1,30 @@
 /**
- * Board page for the Dump (/dump: links not in a folder) and for a folder (/folders/:id). Download
- * fetches an Instagram reel or carousel into the backend's download folder (`<id>.mp4` or `<id>/`);
- * a link is "Downloaded" when that exists. Cards can be dragged onto a sidebar folder or the Dump.
- * "Per row" is remembered per browser.
+ * Board page for Home (/home), a folder (/folders/:id), or the Bin (/bin). Download fetches an
+ * Instagram reel or carousel into the backend's download folder (`<id>.mp4` or `<id>/`); a link is
+ * "Downloaded" when that exists. Cards can be dragged to reorder within Home/a folder, or onto a
+ * sidebar folder, the Dump, or the Bin. Emptying the Bin permanently deletes links and their files.
  */
 import { ChangeDetectionStrategy, Component, HostListener, computed, effect, inject, signal, untracked } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { map } from 'rxjs';
+import { filter, from, map, of } from 'rxjs';
+import { catchError, concatMap, toArray } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
-import { DownloadStats, DumpService, Save, SaveScope, SaveSource } from '../../services/dump.service';
+import { DownloadStats, DumpService, MoveTarget, Save, SaveScope, SaveSource } from '../../services/dump.service';
 import { FoldersService } from '../../services/folders.service';
-import { CardDragService } from '../../services/card-drag.service';
+import { CardDragService, isCalendarDrop } from '../../services/card-drag.service';
+import { CalendarScheduleService } from '../../services/calendar-schedule.service';
 import { PlaybackService } from '../../services/playback.service';
-import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
+import { ConfirmDialogService } from '../../services/confirm-dialog.service';
+import { CdkDrag, CdkDragDrop, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { UserContextService } from '../../services/user-context.service';
 import { LocalSessionService } from '../../services/local-session.service';
 import { CacheService } from '../../services/cache.service';
 import { MediaCarouselComponent } from '../../shared/components/media-carousel/media-carousel.component';
 import { AutofocusSelectDirective } from '../../shared/directives/autofocus-select.directive';
+import { extractPasteLinks } from '../../shared/utils/paste-links';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
@@ -51,7 +55,9 @@ export class DumpPageComponent {
   private router = inject(Router);
   private title = inject(Title);
   private cardDrag = inject(CardDragService);
+  readonly calendarSchedule = inject(CalendarScheduleService);
   private playback = inject(PlaybackService);
+  private confirm = inject(ConfirmDialogService);
   private userContext = inject(UserContextService);
   private session = inject(LocalSessionService);
   private cacheService = inject(CacheService);
@@ -68,7 +74,15 @@ export class DumpPageComponent {
     return first ? `${first.charAt(0).toUpperCase()}${first.slice(1)}'s Instaboard` : 'Your Instaboard';
   });
 
-  /** Folder id from /folders/:id, or null on /dump. */
+  private readonly currentPath = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects.split('?')[0])
+    ),
+    { initialValue: this.router.url.split('?')[0] }
+  );
+
+  /** Folder id from /folders/:id, or null on /home and /bin. */
   readonly folderId = toSignal(
     inject(ActivatedRoute).paramMap.pipe(
       map((p) => {
@@ -78,18 +92,21 @@ export class DumpPageComponent {
     ),
     { initialValue: null }
   );
-  readonly scope = computed<SaveScope>(() => this.folderId() ?? 'dump');
+  readonly isBin = computed(() => this.currentPath() === '/bin');
+  readonly scope = computed<SaveScope>(() => (this.isBin() ? 'bin' : (this.folderId() ?? 'dump')));
   readonly folder = computed(() => {
     const id = this.folderId();
     return id === null ? null : (this.foldersService.byId().get(id) ?? null);
   });
-  readonly heading = computed(() => (this.folderId() === null ? 'Home' : (this.folder()?.name ?? 'Folder')));
+  readonly heading = computed(() =>
+    this.isBin() ? 'Bin' : this.folderId() === null ? 'Home' : (this.folder()?.name ?? 'Folder')
+  );
   /**
    * Home: fixed 142px tracks centered in the column (as on Shopify's home feed); auto-fit collapses
-   * empty tracks so a short row stays centered. Folders: the chosen number per row.
+   * empty tracks so a short row stays centered. Folders / Bin: the chosen number per row.
    */
   readonly gridClass = computed(() =>
-    this.folderId() === null
+    this.folderId() === null && !this.isBin()
       ? 'justify-center [grid-template-columns:repeat(auto-fit,142px)]'
       : 'grid-cols-2 sm:grid-cols-3 md:[grid-template-columns:repeat(var(--per-row),minmax(0,1fr))]',
   );
@@ -107,6 +124,8 @@ export class DumpPageComponent {
   addError = signal<string | null>(null);
   /** Add-link popup on folder pages. */
   addDialogOpen = signal(false);
+  /** Card metadata popup (source, when saved, download status, link actions). */
+  detailsSave = signal<Save | null>(null);
   loadError = signal<string | null>(null);
 
   constructor() {
@@ -124,7 +143,7 @@ export class DumpPageComponent {
     // A folder that no longer exists (deleted, or a stale link) goes back to the Dump.
     effect(() => {
       if (this.folderId() !== null && this.foldersService.loaded() && !this.folder()) {
-        untracked(() => this.router.navigate(['/dump']));
+        untracked(() => this.router.navigate(['/home']));
       }
     });
     effect(() => this.title.setTitle(`Instaboard - ${this.heading()}`));
@@ -135,24 +154,42 @@ export class DumpPageComponent {
     this.loadError.set(null);
     this.downloadErrors.set(new Map());
     this.addDialogOpen.set(false);
+    this.detailsSave.set(null);
     if (scope === 'dump') this.loadStats();
     this.dumpService.load(scope).subscribe({
       error: (err: { status?: number }) => {
-        if (err?.status === 404 && scope !== 'dump') {
-          this.router.navigate(['/dump']);
+        if (err?.status === 404 && scope !== 'dump' && scope !== 'bin') {
+          this.router.navigate(['/home']);
           return;
         }
-        this.loadError.set(`Could not load ${scope === 'dump' ? 'your saves' : 'this folder'}. Is the backend running?`);
+        const what = scope === 'dump' ? 'your saves' : scope === 'bin' ? 'the Bin' : 'this folder';
+        this.loadError.set(`Could not load ${what}. Is the backend running?`);
       },
     });
+  }
+
+  async emptyBin(): Promise<void> {
+    const n = this.count();
+    if (n === 0) return;
+    const ok = await this.confirm.ask({
+      title: 'Empty Bin?',
+      message:
+        n === 1
+          ? 'This permanently deletes 1 link and its downloaded files from disk.'
+          : `This permanently deletes ${n} links and their downloaded files from disk.`,
+      confirmLabel: 'Empty Bin',
+      danger: true,
+    });
+    if (!ok) return;
+    this.foldersService.clearBin();
   }
 
   loadStats(): void {
     this.dumpService.stats().subscribe({ next: (stats) => this.stats.set(stats), error: () => {} });
   }
 
-  /** Fills the Home box from the clipboard (one click instead of Cmd+V). */
-  async pasteFromClipboard(input: HTMLInputElement): Promise<void> {
+  /** Fills the Home box from the clipboard (one click instead of Cmd+V). Supports multi-link pastes. */
+  async pasteFromClipboard(input: HTMLInputElement | HTMLTextAreaElement): Promise<void> {
     try {
       const text = (await navigator.clipboard.readText()).trim();
       if (text) {
@@ -163,6 +200,26 @@ export class DumpPageComponent {
       this.addError.set('Your browser blocked reading the clipboard. Paste with Cmd+V instead.');
     }
     input.focus();
+  }
+
+  /** Load links from a .txt / .csv file into the box (same bulk parser as paste). */
+  onLinksFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '').trim();
+      if (!text) {
+        this.addError.set('That file was empty.');
+        return;
+      }
+      this.linkInput.set(text);
+      this.addError.set(null);
+    };
+    reader.onerror = () => this.addError.set('Could not read that file.');
+    reader.readAsText(file);
   }
 
   formatBytes(bytes: number): string {
@@ -182,25 +239,52 @@ export class DumpPageComponent {
   }
 
   addLink(): void {
-    const url = this.linkInput().trim();
-    if (!url || this.adding()) return;
+    const raw = this.linkInput().trim();
+    if (!raw || this.adding()) return;
     if (!this.isLoggedIn()) {
       this.addError.set("Instaboard isn't connected yet. Try again in a moment.");
       return;
     }
+    const urls = extractPasteLinks(raw);
+    if (urls.length === 0) {
+      this.addError.set('No Instagram, YouTube or Pinterest links found. Paste one or more URLs.');
+      return;
+    }
     this.adding.set(true);
     this.addError.set(null);
-    this.dumpService.add(url, this.scope()).subscribe({
-      next: () => {
-        this.linkInput.set('');
-        this.adding.set(false);
-        this.addDialogOpen.set(false);
-      },
-      error: (err: Error) => {
-        this.addError.set(err.message);
-        this.adding.set(false);
-      },
-    });
+    const scope = this.scope();
+    from(urls)
+      .pipe(
+        concatMap((url) =>
+          this.dumpService.add(url, scope).pipe(
+            map(() => ({ url, ok: true as const, error: null as string | null })),
+            catchError((err: Error) => of({ url, ok: false as const, error: err.message }))
+          )
+        ),
+        toArray()
+      )
+      .subscribe({
+        next: (results) => {
+          this.adding.set(false);
+          const ok = results.filter((r) => r.ok).length;
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length === 0) {
+            this.linkInput.set('');
+            this.addDialogOpen.set(false);
+            return;
+          }
+          if (ok > 0) {
+            this.linkInput.set(failed.map((f) => f.url).join('\n'));
+            this.addError.set(`Saved ${ok} of ${results.length}. ${failed[0].error}`);
+            return;
+          }
+          this.addError.set(failed[0].error || 'Could not save these links.');
+        },
+        error: (err: Error) => {
+          this.adding.set(false);
+          this.addError.set(err.message);
+        },
+      });
   }
 
   openAddDialog(): void {
@@ -215,8 +299,20 @@ export class DumpPageComponent {
     this.addError.set(null);
   }
 
+  openDetails(save: Save): void {
+    this.detailsSave.set(save);
+  }
+
+  closeDetails(): void {
+    this.detailsSave.set(null);
+  }
+
   @HostListener('document:keydown.escape')
   onEscape(): void {
+    if (this.detailsSave()) {
+      this.closeDetails();
+      return;
+    }
     if (this.addDialogOpen()) this.closeAddDialog();
   }
 
@@ -227,19 +323,47 @@ export class DumpPageComponent {
   }
 
   onCardDragMoved(event: CdkDragMove<Save>): void {
-    const target = this.cardDrag.targetAt(event.pointerPosition.x, event.pointerPosition.y);
-    this.cardDrag.hoverTarget.set(target !== null && target !== this.scope() ? target : null);
+    this.cardDrag.hoverTarget.set(this.resolveDropTarget(event.pointerPosition.x, event.pointerPosition.y));
   }
 
-  /** Dropped on a sidebar folder or the Dump: move it (optimistic). Anywhere else: it slides back. */
-  onCardDragEnded(save: Save, _event: CdkDragEnd<Save>): void {
-    const target = this.cardDrag.hoverTarget();
+  /** Drop within the board: shuffle order on Home / folders (not the Bin). */
+  onCardDropped(event: CdkDragDrop<Save[]>): void {
+    if (this.isBin() || this.cardDrag.hoverTarget() !== null) return;
+    if (event.previousIndex === event.currentIndex) return;
+    const scope = this.scope();
+    if (scope === 'bin') return;
+    this.dumpService.reorder(scope, event.previousIndex, event.currentIndex).subscribe({
+      error: (err: Error) => this.foldersService.showNotice(`Couldn't reorder. ${err.message}`),
+    });
+  }
+
+  /** Calendar day: schedule in place. Bin: soft-delete. From Bin onto Home/folder: restore. Else move. */
+  onCardDragEnded(save: Save, event: CdkDragEnd<Save>): void {
+    // Prefer the release point — last move can miss when the pointer is over the fixed pane.
+    const target =
+      this.resolveDropTarget(event.dropPoint.x, event.dropPoint.y) ?? this.cardDrag.hoverTarget();
     this.cardDrag.dragging.set(null);
     this.cardDrag.hoverTarget.set(null);
     this.playback.dragPause.set(false);
-    if (target !== null) {
-      this.foldersService.moveSave(save, target);
+    if (isCalendarDrop(target)) {
+      this.calendarSchedule.schedule(save.id, target.date);
+      return;
     }
+    if (target === 'bin') {
+      if (this.scope() !== 'bin') this.foldersService.deleteSave(save);
+    } else if (target !== null) {
+      const dest = target as MoveTarget;
+      if (this.scope() === 'bin') this.foldersService.restoreSave(save, dest);
+      else this.foldersService.moveSave(save, dest);
+    }
+  }
+
+  /** Folder/bin targets ignore the current board scope; calendar days always count. */
+  private resolveDropTarget(x: number, y: number) {
+    const target = this.cardDrag.targetAt(x, y);
+    if (target === null) return null;
+    if (isCalendarDrop(target)) return target;
+    return target !== this.scope() ? target : null;
   }
 
   download(save: Save): void {

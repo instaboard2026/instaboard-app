@@ -58,7 +58,7 @@ func (r *FolderRepo) List(ctx context.Context, userID int64) ([]models.Folder, e
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT f.id, f.name, f.position, COUNT(s.id)
 		 FROM tbl_folders f
-		 LEFT JOIN tbl_saves s ON s.folder_id = f.id
+		 LEFT JOIN tbl_saves s ON s.folder_id = f.id AND s.deleted_at IS NULL
 		 WHERE f.user_id = ?
 		 GROUP BY f.id
 		 ORDER BY f.position, f.id`,
@@ -84,7 +84,7 @@ func (r *FolderRepo) List(ctx context.Context, userID int64) ([]models.Folder, e
 func (r *FolderRepo) Get(ctx context.Context, userID, id int64) (*models.Folder, error) {
 	var f models.Folder
 	err := r.db.QueryRowContext(ctx,
-		`SELECT f.id, f.name, f.position, (SELECT COUNT(*) FROM tbl_saves s WHERE s.folder_id = f.id)
+		`SELECT f.id, f.name, f.position, (SELECT COUNT(*) FROM tbl_saves s WHERE s.folder_id = f.id AND s.deleted_at IS NULL)
 		 FROM tbl_folders f WHERE f.id = ? AND f.user_id = ?`,
 		id, userID,
 	).Scan(&f.ID, &f.Name, &f.Position, &f.Count)

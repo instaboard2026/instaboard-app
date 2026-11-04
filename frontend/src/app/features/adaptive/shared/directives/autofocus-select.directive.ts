@@ -1,12 +1,12 @@
 import { AfterViewInit, Directive, ElementRef, inject } from '@angular/core';
 
-/** Focuses an input and selects its text as soon as it appears (inline rename). */
+/** Focuses an input/textarea and selects its text as soon as it appears. */
 @Directive({
-  selector: 'input[appAutofocusSelect]',
+  selector: 'input[appAutofocusSelect], textarea[appAutofocusSelect]',
   standalone: true,
 })
 export class AutofocusSelectDirective implements AfterViewInit {
-  private el = inject<ElementRef<HTMLInputElement>>(ElementRef).nativeElement;
+  private el = inject<ElementRef<HTMLInputElement | HTMLTextAreaElement>>(ElementRef).nativeElement;
 
   ngAfterViewInit(): void {
     setTimeout(() => {

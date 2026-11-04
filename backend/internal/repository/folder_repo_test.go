@@ -156,4 +156,32 @@ func TestFolderSavesMoveAndDelete(t *testing.T) {
 	if _, err := folders.Delete(ctx, other.ID, othersFolder.ID+1000); !errors.Is(err, ErrFolderNotFound) {
 		t.Fatalf("delete unknown folder err = %v", err)
 	}
+
+	binned, err := saves.SoftDelete(ctx, u.ID, s1.ID)
+	if err != nil || binned.DeletedAt == nil {
+		t.Fatalf("SoftDelete = %+v, %v", binned, err)
+	}
+	if dump, _ := saves.ListDump(ctx, u.ID); len(dump) != 0 {
+		t.Fatalf("Dump should hide binned saves: %+v", dump)
+	}
+	if bin, _ := saves.ListBin(ctx, u.ID); len(bin) != 1 || bin[0].ID != s1.ID {
+		t.Fatalf("Bin = %+v", bin)
+	}
+	restored, err := saves.Restore(ctx, u.ID, s1.ID, nil)
+	if err != nil || restored.DeletedAt != nil {
+		t.Fatalf("Restore = %+v, %v", restored, err)
+	}
+	if _, err := saves.SoftDelete(ctx, u.ID, s1.ID); err != nil {
+		t.Fatalf("SoftDelete again = %v", err)
+	}
+	cleared, err := saves.ClearBin(ctx, u.ID)
+	if err != nil || len(cleared) != 1 {
+		t.Fatalf("ClearBin = %+v, %v", cleared, err)
+	}
+	if _, err := saves.Get(ctx, u.ID, s1.ID); !errors.Is(err, ErrSaveNotFound) {
+		t.Fatalf("cleared save should be gone, err = %v", err)
+	}
+	if err := saves.Delete(ctx, other.ID, s1.ID); !errors.Is(err, ErrSaveNotFound) {
+		t.Fatalf("delete someone else's save err = %v", err)
+	}
 }

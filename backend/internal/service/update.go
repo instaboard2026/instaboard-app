@@ -248,15 +248,21 @@ func (u *Updater) Download(ctx context.Context) (*UpdateDownloadResult, error) {
 // Apply downloads the latest zip into ~/.instaboard/runtime/ (not the double-clicked
 // launcher). Caller should restart the launcher; it then execs into the new runtime
 // without another Gatekeeper Allow prompt.
-func (u *Updater) Apply(ctx context.Context) (*UpdateDownloadResult, error) {
-	info, err := u.Check(ctx, true)
+// When force is true, reinstalls the latest release even if already on that version
+// (repair / same-version reinstall). Still requires a downloadable release asset.
+func (u *Updater) Apply(ctx context.Context, force bool) (*UpdateDownloadResult, error) {
+	if !u.enabled {
+		return nil, fmt.Errorf("update and restart is disabled in this build")
+	}
+
+	info, err := u.fetchLatest(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if info.Skipped {
-		return nil, fmt.Errorf("update and restart is only available in release builds")
+	if info.DownloadURL == "" {
+		return nil, fmt.Errorf("latest release has no %s asset", u.asset)
 	}
-	if !info.UpdateAvailable || info.DownloadURL == "" {
+	if !force && !info.UpdateAvailable {
 		return nil, fmt.Errorf("no update available to apply")
 	}
 
@@ -292,10 +298,13 @@ func (u *Updater) Apply(ctx context.Context) (*UpdateDownloadResult, error) {
 		return nil, fmt.Errorf("install update runtime: %w", err)
 	}
 
-	// Keep a zip in Downloads for manual installs.
-	if home, err := os.UserHomeDir(); err == nil {
-		dest := filepath.Join(home, "Downloads", u.asset)
-		_ = copyFile(zipPath, dest)
+	// Optional zip in Downloads for manual installs — skip on force reinstall
+	// (user already has a working launcher; no Finder zip needed).
+	if !force {
+		if home, err := os.UserHomeDir(); err == nil {
+			dest := filepath.Join(home, "Downloads", u.asset)
+			_ = copyFile(zipPath, dest)
+		}
 	}
 
 	return &UpdateDownloadResult{Path: RuntimeBinaryPath()}, nil

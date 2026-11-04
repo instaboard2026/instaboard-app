@@ -29,9 +29,10 @@ import { AutoplayVideoDirective } from '../../directives/autoplay-video.directiv
                 playsinline
                 controls
                 preload="metadata"
+                draggable="false"
                 (mousedown)="keepControlsUsable($event)"
                 (touchstart)="keepControlsUsable($event)"
-                class="h-full w-full object-contain"></video>
+                class="h-full w-full select-none object-contain"></video>
             } @else {
               <img [src]="item.url" [alt]="'Item ' + (i + 1)" loading="lazy" draggable="false" class="h-full w-full select-none object-contain" />
             }

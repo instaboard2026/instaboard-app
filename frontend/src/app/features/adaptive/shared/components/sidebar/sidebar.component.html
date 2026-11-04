@@ -20,7 +20,7 @@
     <!-- ===== Expanded ===== -->
     <div class="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
       <a
-        routerLink="/dump"
+        routerLink="/home"
         (click)="onNavLinkClick()"
         class="flex min-w-0 items-center gap-2 rounded-md text-white no-underline hover:opacity-90">
         <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 text-sm font-bold text-white">I</span>
@@ -41,7 +41,7 @@
       <nav class="flex flex-col gap-0.5 pt-2">
         <a
           (click)="onNavLinkClick()"
-          routerLink="/dump"
+          routerLink="/home"
           routerLinkActive="!bg-nav-active !text-white"
           data-drop-folder="dump"
           class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
@@ -51,6 +51,15 @@
           @if (isLoggedIn() && dumpCount() > 0) {
             <span class="min-w-[20px] h-5 rounded-full bg-blue-600 px-1.5 text-center text-[11px] font-semibold leading-5 text-white">{{ dumpCount() }}</span>
           }
+        </a>
+
+        <a
+          (click)="onNavLinkClick()"
+          routerLink="/calendar"
+          routerLinkActive="!bg-nav-active !text-white"
+          class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover">
+          <span class="material-icons-outlined !text-xl shrink-0">calendar_month</span>
+          <span class="flex-1">Calendar</span>
         </a>
 
         @if (isLoggedIn()) {
@@ -156,6 +165,20 @@
       </nav>
     </div>
 
+    <!-- Bin sits just above the account footer (open + drop target). -->
+    @if (isLoggedIn()) {
+      <button
+        type="button"
+        data-drop-folder="bin"
+        (click)="openBin()"
+        aria-label="Open Bin — drop a reel here to move it to the Bin"
+        class="bin-row mx-2 mb-1 flex h-24 shrink-0 items-center justify-center rounded-xl transition-colors"
+        [class.drop-target-bin-active]="cardDrag.isHovered('bin')"
+        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin')">
+        <img src="/icons/bin.png" alt="" width="84" height="96" class="bin-photo select-none" draggable="false" />
+      </button>
+    }
+
     <!-- Footer: account (logged in) or Sign In / Sign Up -->
     <div class="shrink-0 border-t border-nav-border p-2">
       @if (isLoggedIn() && displayName(); as name) {
@@ -191,7 +214,7 @@
 
     <nav class="flex flex-1 flex-col items-center gap-1 overflow-y-auto hide-scroll px-2 pb-3 pt-1">
       <a
-        routerLink="/dump"
+        routerLink="/home"
         routerLinkActive="!bg-nav-active !text-white"
         data-drop-folder="dump"
         [appTooltip]="'Home'"
@@ -202,6 +225,15 @@
         @if (isLoggedIn() && dumpCount() > 0) {
           <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-nav-bg"></span>
         }
+      </a>
+
+      <a
+        routerLink="/calendar"
+        routerLinkActive="!bg-nav-active !text-white"
+        [appTooltip]="'Calendar'"
+        aria-label="Calendar"
+        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover">
+        <span class="material-icons-outlined !text-xl">calendar_month</span>
       </a>
 
       @if (isLoggedIn()) {
@@ -232,6 +264,20 @@
       }
     </nav>
 
+    @if (isLoggedIn()) {
+      <button
+        type="button"
+        data-drop-folder="bin"
+        (click)="openBin()"
+        [appTooltip]="'Bin'"
+        aria-label="Open Bin — drop a reel here to move it to the Bin"
+        class="bin-row mb-1 inline-flex h-20 w-20 shrink-0 items-center justify-center self-center rounded-xl transition-colors"
+        [class.drop-target-bin-active]="cardDrag.isHovered('bin')"
+        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin')">
+        <img src="/icons/bin.png" alt="" width="72" height="80" class="bin-photo select-none" draggable="false" />
+      </button>
+    }
+
     <div class="flex shrink-0 justify-center border-t border-nav-border py-2.5">
       @if (isLoggedIn() && displayName(); as name) {
         <button
@@ -256,3 +302,4 @@
     <path d="M7.75 4v12" stroke="currentColor" stroke-width="1.5" />
   </svg>
 </ng-template>
+

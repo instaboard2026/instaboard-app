@@ -3,11 +3,13 @@ import { FooterComponent } from './app/features/adaptive/shared/components/foote
 import { ThemeService } from './app/features/adaptive/services/theme.service';
 import { CommonModule } from '@angular/common';
 import { SidebarComponent } from './app/features/adaptive/shared/components/sidebar/sidebar.component';
+import { CalendarPaneComponent } from './app/features/adaptive/shared/components/calendar-pane/calendar-pane.component';
 import { CacheService } from './app/features/adaptive/services/cache.service';
+import { DumpService, SaveScope } from './app/features/adaptive/services/dump.service';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { CdkScrollable } from '@angular/cdk/scrolling';
-import { filter } from 'rxjs';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { APP_SCROLL_ID, scrollPageToTop } from './app/features/adaptive/shared/utils/page-scroll';
 import { LayoutControlService } from './app/features/adaptive/services/layout-control.service';
 import { AccountMenuModalContainerComponent } from './app/features/adaptive/shared/components/account-menu-modal/account-menu-modal-container.component';
@@ -18,11 +20,14 @@ import { UpdateService } from './app/features/adaptive/services/update.service';
 import { AppLifecycleService } from './app/features/adaptive/services/app-lifecycle.service';
 
 const SIDEBAR_STATE_KEY = 'sidebar_open';
+const CALENDAR_PANE_KEY = 'calendar_pane_open';
 /** Below this width the navigation is an icon rail that opens as a drawer over the page. */
 const MOBILE_BREAKPOINT = 768;
 /** Must match the sidebar's `w-[220px]` / `w-14`. */
 const SIDEBAR_WIDTH = 220;
 const RAIL_WIDTH = 56;
+/** Must match the calendar pane's expanded / collapsed widths. */
+const CALENDAR_PANE_WIDTH = 300;
 const APP_LOADED_KEY = 'app_loaded_session';
 
 @Component({
@@ -34,6 +39,7 @@ const APP_LOADED_KEY = 'app_loaded_session';
     CommonModule,
     FooterComponent,
     SidebarComponent,
+    CalendarPaneComponent,
     RouterOutlet,
     CdkScrollable,
     AccountMenuModalContainerComponent,
@@ -45,24 +51,61 @@ export class AppComponent implements OnInit {
   cacheService = inject(CacheService);
   layoutControlService = inject(LayoutControlService);
   userContext = inject(UserContextService);
+  private dumpService = inject(DumpService);
   private session = inject(LocalSessionService);
   private updates = inject(UpdateService);
+  private router = inject(Router);
   readonly lifecycle = inject(AppLifecycleService);
 
   readonly appScrollId = APP_SCROLL_ID;
   isShellVisible = this.layoutControlService.isShellVisible;
   /** Desktop: expanded sidebar (true) or icon rail (false). Phones: drawer open over the page. */
   isSidebarOpen = signal(false);
+  /** Right calendar pane expanded (true) or icon rail (false). */
+  isCalendarPaneOpen = signal(true);
   isMobile = signal(typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT);
   isAppLoading = signal(true);
   isInitializing = signal(true);
 
   isDarkMode = this.themeService.isDarkMode;
 
+  private readonly currentPath = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects.split('?')[0])
+    ),
+    { initialValue: this.router.url.split('?')[0] }
+  );
+
+  /** Home or folder board scope for the right calendar pane (null on Bin / Profile / Calendar / etc.). */
+  private readonly calendarBoardScope = computed<SaveScope | null>(() => {
+    const path = this.currentPath();
+    if (path === '/home' || path === '/dump') return 'dump';
+    const m = /^\/folders\/(\d+)$/.exec(path);
+    if (!m) return null;
+    const id = Number(m[1]);
+    return Number.isFinite(id) ? id : null;
+  });
+
+  /** Pane only when shell is on Home/folder and that board has at least one save. */
+  readonly showCalendarPane = computed(() => {
+    if (!this.isShellVisible()) return false;
+    const scope = this.calendarBoardScope();
+    if (scope === null) return false;
+    return this.dumpService.listFor(scope).length > 0;
+  });
+
   /** Left offset of the page: the expanded sidebar's width, or the icon rail's. */
   contentOffset = computed(() => {
     if (!this.isShellVisible()) return null;
     return this.isMobile() || !this.isSidebarOpen() ? `${RAIL_WIDTH}px` : `${SIDEBAR_WIDTH}px`;
+  });
+
+  /** Right offset when the calendar pane is visible. */
+  contentOffsetRight = computed(() => {
+    if (!this.showCalendarPane()) return null;
+    if (this.isMobile()) return `${RAIL_WIDTH}px`;
+    return this.isCalendarPaneOpen() ? `${CALENDAR_PANE_WIDTH}px` : `${RAIL_WIDTH}px`;
   });
 
   constructor() {
@@ -72,10 +115,16 @@ export class AppComponent implements OnInit {
     } else {
       this.isSidebarOpen.set(savedSidebarState ?? true);
     }
+    const savedCalendarPane = this.cacheService.getItem<boolean>(CALENDAR_PANE_KEY);
+    this.isCalendarPaneOpen.set(this.isMobile() ? false : (savedCalendarPane ?? true));
     // Remember the desktop choice only; the phone drawer always starts closed.
     effect(() => {
       const open = this.isSidebarOpen();
       if (!this.isMobile()) this.cacheService.setItem(SIDEBAR_STATE_KEY, open);
+    });
+    effect(() => {
+      const open = this.isCalendarPaneOpen();
+      if (!this.isMobile()) this.cacheService.setItem(CALENDAR_PANE_KEY, open);
     });
     effect(() => {
       if (this.isDarkMode()) {
@@ -89,7 +138,7 @@ export class AppComponent implements OnInit {
       if (this.session.status() === 'ready') this.updates.check();
     });
     // The panel keeps its scroll position across routes, so start each page at the top.
-    inject(Router).events
+    this.router.events
       .pipe(filter(e => e instanceof NavigationEnd), takeUntilDestroyed())
       .subscribe(() => scrollPageToTop('instant'));
   }
@@ -117,12 +166,17 @@ export class AppComponent implements OnInit {
     this.isSidebarOpen.set(true);
   }
 
+  toggleCalendarPane(): void {
+    this.isCalendarPaneOpen.update((open) => !open);
+  }
+
   @HostListener('window:resize')
   onResize(): void {
     const mobile = window.innerWidth < MOBILE_BREAKPOINT;
     if (mobile === this.isMobile()) return;
     this.isMobile.set(mobile);
     this.isSidebarOpen.set(mobile ? false : (this.cacheService.getItem<boolean>(SIDEBAR_STATE_KEY) ?? true));
+    this.isCalendarPaneOpen.set(mobile ? false : (this.cacheService.getItem<boolean>(CALENDAR_PANE_KEY) ?? true));
   }
 
   /** Cmd+B (Mac) / Ctrl+B collapses or expands the navigation, like Shopify. */

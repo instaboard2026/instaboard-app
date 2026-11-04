@@ -7,11 +7,11 @@ Angular 21 app for Instaboard (Home, folders, downloads). It talks to the local 
 
 ```sh
 npm install
-npm start          # http://localhost:5281, API at http://localhost:8788
+npm start          # http://localhost:5200, API at http://localhost:8788
 ```
 
-`npm run build` produces `dist/`, which the backend serves in the packaged app (API calls go to the
-same origin in production builds).
+`npm run build` produces `dist/`, which the backend serves in the packaged app on
+`http://localhost:4200` (API calls go to the same origin in production builds).
 
 ## Notes
 

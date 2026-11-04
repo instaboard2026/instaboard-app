@@ -44,10 +44,12 @@ func (h *UpdateHandler) Download(w http.ResponseWriter, r *http.Request) {
 }
 
 // Apply handles POST /api/update/apply — download, replace the binary, then restart.
+// Pass ?force=1 to reinstall the latest release even when already on that version.
 func (h *UpdateHandler) Apply(w http.ResponseWriter, r *http.Request) {
-	result, err := h.updater.Apply(r.Context())
+	force := r.URL.Query().Get("force") == "1" || r.URL.Query().Get("force") == "true"
+	result, err := h.updater.Apply(r.Context(), force)
 	if err != nil {
-		slog.Warn("update apply failed", "err", err)
+		slog.Warn("update apply failed", "err", err, "force", force)
 		utils.WriteError(w, http.StatusBadRequest, err.Error(), nil)
 		return
 	}

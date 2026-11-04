@@ -28,7 +28,11 @@ export interface Save {
   added_from: string;
   /** null = in the Dump. */
   folder_id: number | null;
+  /** Manual board order within Home or a folder (lower = earlier). */
+  position: number;
   created_at: string;
+  /** Set when the save is in the Bin (soft-deleted). */
+  deleted_at?: string | null;
   /** null = not downloaded yet. */
   download: SaveDownload | null;
 }
@@ -57,16 +61,22 @@ interface ApiWrapper<T> {
   message?: string;
 }
 
-/** Where a list of saves lives: the Dump or a folder id. */
-export type SaveScope = 'dump' | number;
+/** Where a list of saves lives: the Dump, the Bin, or a folder id. */
+export type SaveScope = 'dump' | 'bin' | number;
+/** Home or a folder — targets for move/restore (not the Bin). */
+export type MoveTarget = Exclude<SaveScope, 'bin'>;
 
 const scopeKey = (scope: SaveScope) => String(scope);
-const scopePath = (scope: SaveScope) => (scope === 'dump' ? '/api/dump' : `/api/folders/${scope}/saves`);
-const newestFirst = (a: Save, b: Save) => b.created_at.localeCompare(a.created_at) || b.id - a.id;
+const scopePath = (scope: SaveScope) =>
+  scope === 'dump' ? '/api/dump' : scope === 'bin' ? '/api/bin' : `/api/folders/${scope}/saves`;
+const orderPath = (scope: MoveTarget) =>
+  scope === 'dump' ? '/api/dump/order' : `/api/folders/${scope}/saves/order`;
+const newestDeletedFirst = (a: Save, b: Save) =>
+  (b.deleted_at ?? '').localeCompare(a.deleted_at ?? '') || b.id - a.id;
 
 /**
- * Saves per scope (the Dump and each opened folder), shared by the sidebar badge, the Dump page and
- * folder pages. Moves between scopes are applied locally first (see FoldersService.moveSave).
+ * Saves per scope (the Dump, Bin, and each opened folder), shared by the sidebar badge, the Dump
+ * page and folder pages. Moves between scopes are applied locally first (see FoldersService).
  */
 @Injectable({ providedIn: 'root' })
 export class DumpService {
@@ -82,6 +92,15 @@ export class DumpService {
   loading = computed(() => this.isLoading('dump'));
   loaded = computed(() => this.isLoaded('dump'));
   count = computed(() => this.saves().length);
+
+  /** All loaded saves by id (Home, folders, Bin) — used for calendar thumbnails. */
+  readonly byId = computed(() => {
+    const map = new Map<number, Save>();
+    for (const list of this._lists().values()) {
+      for (const save of list) map.set(save.id, save);
+    }
+    return map as ReadonlyMap<number, Save>;
+  });
 
   listFor(scope: SaveScope): Save[] {
     return this._lists().get(scopeKey(scope)) ?? [];
@@ -271,13 +290,57 @@ export class DumpService {
     return null;
   }
 
-  /** Adds a save to a scope's list (if that list is loaded), keeping newest first. */
+  /**
+   * Adds a save to a scope's list (if that list is loaded). Home/folder: front of the board.
+   * Bin: newest deleted first.
+   */
   putSave(save: Save, scope: SaveScope): void {
     const key = scopeKey(scope);
     const list = this._lists().get(key);
     if (!list && !this._loaded().has(key)) return;
-    const next = [...(list ?? []).filter((s) => s.id !== save.id), save].sort(newestFirst);
+    const rest = (list ?? []).filter((s) => s.id !== save.id);
+    const next = scope === 'bin' ? [...rest, save].sort(newestDeletedFirst) : [save, ...rest];
     this._lists.update((m) => new Map(m).set(key, next));
+  }
+
+  /**
+   * Reorders saves on Home or a folder (optimistic). Rolls back if the server rejects the order.
+   */
+  reorder(scope: MoveTarget, fromIndex: number, toIndex: number): Observable<Save[]> {
+    const before = this.listFor(scope);
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || toIndex >= before.length) {
+      return of(before);
+    }
+    const next = [...before];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    const positioned = next.map((s, i) => ({ ...s, position: i + 1 }));
+    this.setList(scope, positioned);
+
+    const headers = this.authHeaders();
+    if (!headers) {
+      this.setList(scope, before);
+      return throwError(() => new Error('Please sign in.'));
+    }
+    return this.http
+      .put<ApiWrapper<Save[]>>(`${environment.apiUrl}${orderPath(scope)}`, { ids: positioned.map((s) => s.id) }, { headers })
+      .pipe(
+        map((res) => {
+          if (res?.status !== 'SUCCESS' || !Array.isArray(res.data)) {
+            throw new Error(res?.message || 'Could not reorder.');
+          }
+          return res.data;
+        }),
+        tap((saves) => this.setList(scope, saves)),
+        catchError((err: unknown) => {
+          this.setList(scope, before);
+          const message =
+            err instanceof HttpErrorResponse
+              ? err.error?.message || 'Could not reorder.'
+              : (err as Error)?.message || 'Could not reorder.';
+          return throwError(() => new Error(capitalize(message)));
+        })
+      );
   }
 
   /** Replaces a save wherever it is listed (e.g. after a download). */
@@ -306,6 +369,12 @@ export class DumpService {
       next.delete(key);
       return next;
     });
+  }
+
+  /** Replaces a scope's list in memory (e.g. after emptying the Bin). */
+  replaceList(scope: SaveScope, saves: Save[]): void {
+    this.setList(scope, saves);
+    this._loaded.update((s) => new Set(s).add(scopeKey(scope)));
   }
 
   private setList(scope: SaveScope, saves: Save[]): void {

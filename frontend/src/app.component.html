@@ -32,7 +32,8 @@
     [class.bg-nav-bg]="isShellVisible()"
     [class.h-screen]="isShellVisible()"
     [class.py-1]="isShellVisible()"
-    [class.pr-1]="isShellVisible()">
+    [class.pr-1]="isShellVisible()"
+    [class.pl-1]="isShellVisible() && showCalendarPane()">
     <div
       [id]="appScrollId"
       cdkScrollable
@@ -41,6 +42,7 @@
       [class.transition-[margin]]="!isInitializing() && isShellVisible()"
       [class.duration-300]="!isInitializing() && isShellVisible()"
       [style.margin-left]="contentOffset()"
+      [style.margin-right]="contentOffsetRight()"
       [class.h-full]="isShellVisible()"
       [class.overflow-y-auto]="isShellVisible()"
       [class.rounded-2xl]="isShellVisible()">
@@ -53,6 +55,14 @@
       }
     </div>
   </div>
+
+  <!-- After the shell so the fixed pane stacks above the full-bleed frame and receives drops. -->
+  @if (showCalendarPane()) {
+    <app-calendar-pane
+      [isOpen]="isCalendarPaneOpen()"
+      [isInitializing]="isInitializing()"
+      (togglePane)="toggleCalendarPane()"></app-calendar-pane>
+  }
 }
 
 <app-account-menu-modal-container></app-account-menu-modal-container>

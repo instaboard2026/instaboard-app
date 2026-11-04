@@ -129,7 +129,26 @@ export class UpdateService {
       confirmLabel: 'Update and restart',
     });
     if (!ok) return;
+    this.postApply(false, `Could not apply the update.`);
+  }
 
+  /**
+   * Reinstall the latest GitHub release into ~/.instaboard/runtime even when already
+   * on that version (repair / same-version test). No zip left for the user to open.
+   */
+  async reinstallLatest(): Promise<void> {
+    if (this.busy()) return;
+    const latest = this.info()?.latest ?? 'the latest release';
+    const ok = await this.confirm.ask({
+      title: `Reinstall ${latest}?`,
+      message: 'Downloads the same release again and replaces the installed binary, then restarts. Use this to repair a broken install without fetching a zip yourself.',
+      confirmLabel: 'Reinstall and restart',
+    });
+    if (!ok) return;
+    this.postApply(true, `Could not reinstall.`);
+  }
+
+  private postApply(force: boolean, failMsg: string): void {
     const headers = this.authHeaders();
     if (!headers) {
       this.message.set('Please wait for Instaboard to connect.');
@@ -137,11 +156,14 @@ export class UpdateService {
     }
     this.applying.set(true);
     this.message.set(null);
-    this.http.post<ApiWrapper<{ path: string }>>(`${environment.apiUrl}/api/update/apply`, null, { headers }).subscribe({
+    const url = force
+      ? `${environment.apiUrl}/api/update/apply?force=1`
+      : `${environment.apiUrl}/api/update/apply`;
+    this.http.post<ApiWrapper<{ path: string }>>(url, null, { headers }).subscribe({
       next: (res) => {
         this.applying.set(false);
         if (res?.status !== 'SUCCESS') {
-          this.message.set(res?.message || 'Could not apply the update.');
+          this.message.set(res?.message || failMsg);
           return;
         }
         this.lifecycle.beginRestartWait();
@@ -155,8 +177,8 @@ export class UpdateService {
         }
         this.message.set(
           err instanceof HttpErrorResponse
-            ? err.error?.message || 'Could not apply the update.'
-            : (err as Error)?.message || 'Could not apply the update.'
+            ? err.error?.message || failMsg
+            : (err as Error)?.message || failMsg
         );
       },
     });

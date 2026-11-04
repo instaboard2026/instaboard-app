@@ -1,0 +1,239 @@
+<aside
+  class="fixed right-0 top-0 z-[60] flex h-full flex-col overflow-hidden bg-nav-bg text-nav-text"
+  [style.width.px]="isOpen() ? 300 : 56"
+  [class.transition-[width]]="!isInitializing()"
+  [class.duration-300]="!isInitializing()"
+  [class.ease-in-out]="!isInitializing()"
+  [class.ring-2]="!!cardDrag.dragging()"
+  [class.ring-inset]="!!cardDrag.dragging()"
+  [class.ring-blue-500/40]="!!cardDrag.dragging()">
+  @if (isOpen()) {
+    <div class="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+      <div class="flex min-w-0 items-center gap-2">
+        <span class="material-icons-outlined !text-xl shrink-0 text-nav-muted">calendar_month</span>
+        <span class="truncate text-sm font-semibold">Calendar</span>
+      </div>
+      <button
+        type="button"
+        (click)="onToggle()"
+        aria-label="Collapse calendar"
+        title="Collapse calendar"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="3" stroke="currentColor" stroke-width="1.5" />
+          <path d="M12.25 4v12" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="flex items-center justify-between gap-1 px-3 pb-2">
+      <h2 class="min-w-0 truncate text-xs font-medium text-nav-muted">{{ monthLabel() }}</h2>
+      <div class="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          (click)="shiftMonth(-1)"
+          aria-label="Previous month"
+          class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+          <span class="material-icons-outlined !text-lg">chevron_left</span>
+        </button>
+        <button
+          type="button"
+          (click)="goToday()"
+          class="h-7 rounded-lg px-1.5 text-[11px] font-medium text-nav-muted hover:bg-nav-hover hover:text-white">
+          Today
+        </button>
+        <button
+          type="button"
+          (click)="shiftMonth(1)"
+          aria-label="Next month"
+          class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+          <span class="material-icons-outlined !text-lg">chevron_right</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="min-h-0 flex-1 overflow-y-auto hide-scroll px-2 pb-2">
+      <div class="grid grid-cols-3 gap-1.5" role="grid" [attr.aria-label]="monthLabel()">
+        @for (cell of cells(); track cell.key) {
+          <button
+            type="button"
+            role="gridcell"
+            [attr.data-drop-calendar]="cell.key"
+            (click)="openDay(cell)"
+            class="group relative flex min-h-[88px] flex-col rounded-xl border border-white/10 bg-white/5 p-1.5 text-left transition-colors hover:bg-white/10"
+            [class.ring-2]="cell.isToday || selectedKey() === cell.key || hoverDate() === cell.key"
+            [class.ring-blue-400]="cell.isToday || selectedKey() === cell.key || hoverDate() === cell.key"
+            [class.bg-blue-500/20]="selectedKey() === cell.key || hoverDate() === cell.key">
+            <div class="flex items-baseline gap-1 px-0.5">
+              <span
+                class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[11px] font-semibold text-white"
+                [class.bg-blue-600]="cell.isToday">
+                {{ cell.day }}
+              </span>
+              <span class="text-[9px] font-medium uppercase tracking-wide text-nav-muted">
+                {{ cell.weekday }}
+              </span>
+            </div>
+
+            <!-- Mini reel cards (compact; click day for larger popup). -->
+            @if (savesOn(cell.key); as daySaves) {
+              @if (daySaves.length > 0) {
+                <div class="mt-1 flex min-h-0 flex-1 items-end gap-0.5 overflow-hidden px-0.5 pb-0.5">
+                  @for (save of daySaves; track save.id; let i = $index) {
+                    @if (i < maxThumbs) {
+                      <div
+                        class="w-[18px] shrink-0 overflow-hidden rounded-[3px] bg-black shadow-sm ring-1 ring-blue-400/80 aspect-[9/16]"
+                        [attr.title]="'Scheduled save #' + save.id">
+                        @if (thumb(save); as media) {
+                          @if (media.type === 'video') {
+                            <video
+                              [src]="media.url"
+                              muted
+                              playsinline
+                              preload="metadata"
+                              draggable="false"
+                              class="pointer-events-none h-full w-full object-cover"></video>
+                          } @else {
+                            <img
+                              [src]="media.url"
+                              alt=""
+                              draggable="false"
+                              class="pointer-events-none h-full w-full object-cover" />
+                          }
+                        } @else {
+                          <div class="flex h-full w-full items-center justify-center bg-white/10">
+                            <span class="material-icons-outlined !text-[10px] text-white/50">movie</span>
+                          </div>
+                        }
+                      </div>
+                    }
+                  }
+                  @if (daySaves.length > maxThumbs) {
+                    <span class="mb-0.5 text-[10px] font-semibold text-blue-200">+{{ daySaves.length - maxThumbs }}</span>
+                  }
+                </div>
+              }
+            }
+          </button>
+        }
+      </div>
+    </div>
+  } @else {
+    <div class="flex flex-1 flex-col items-center gap-2 px-1 pt-3 pb-3">
+      <button
+        type="button"
+        (click)="onToggle()"
+        aria-label="Expand calendar"
+        title="Expand calendar"
+        class="inline-flex h-10 w-10 items-center justify-center rounded-xl text-nav-muted hover:bg-nav-hover hover:text-white">
+        <span class="material-icons-outlined !text-2xl">calendar_month</span>
+      </button>
+      <button
+        type="button"
+        (click)="onToggle()"
+        aria-label="Expand calendar panel"
+        title="Expand calendar"
+        class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <rect x="2.75" y="3.75" width="14.5" height="12.5" rx="3" stroke="currentColor" stroke-width="1.5" />
+          <path d="M12.25 4v12" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
+    </div>
+  }
+</aside>
+
+<!-- Day popup: larger reel view + notes. Compact month grid stays as-is underneath. -->
+@if (selectedKey(); as key) {
+  <div
+    class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="selectedLabel()">
+    <div class="absolute inset-0 bg-black/60" (click)="closeDayPopup()"></div>
+    <div
+      class="relative flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-nav-bg shadow-2xl text-nav-text"
+      (click)="$event.stopPropagation()">
+      <div class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <div class="min-w-0">
+          <p class="truncate text-sm font-semibold text-white">{{ selectedLabel() }}</p>
+          <p class="text-[11px] text-nav-muted">
+            @if (savesOn(key).length === 0) {
+              No reels scheduled
+            } @else if (savesOn(key).length === 1) {
+              1 reel scheduled
+            } @else {
+              {{ savesOn(key).length }} reels scheduled
+            }
+          </p>
+        </div>
+        <button
+          type="button"
+          (click)="closeDayPopup()"
+          aria-label="Close"
+          class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-nav-muted hover:bg-nav-hover hover:text-white">
+          <span class="material-icons-outlined !text-xl">close</span>
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        @if (savesOn(key); as daySaves) {
+          @if (daySaves.length > 0) {
+            <div class="flex flex-wrap justify-center gap-3">
+              @for (save of daySaves; track save.id) {
+                <div class="relative w-[120px] shrink-0">
+                  <div class="overflow-hidden rounded-xl bg-black shadow-card ring-2 ring-blue-500 aspect-[9/16]">
+                    @if (thumb(save); as media) {
+                      @if (media.type === 'video') {
+                        <video
+                          [src]="media.url"
+                          muted
+                          playsinline
+                          controls
+                          preload="metadata"
+                          draggable="false"
+                          class="h-full w-full object-cover"></video>
+                      } @else {
+                        <img [src]="media.url" alt="" draggable="false" class="h-full w-full object-cover" />
+                      }
+                    } @else {
+                      <div class="flex h-full flex-col items-center justify-center gap-1 bg-white/5 p-2 text-center">
+                        <span class="material-icons-outlined !text-2xl text-white/40">movie</span>
+                        <span class="text-[10px] text-nav-muted">No preview</span>
+                      </div>
+                    }
+                  </div>
+                  <button
+                    type="button"
+                    (click)="unschedule(save.id, $event)"
+                    title="Remove from this day"
+                    aria-label="Remove from this day"
+                    class="absolute -right-1.5 -top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full bg-nav-bg text-nav-muted ring-1 ring-white/20 hover:bg-red-600 hover:text-white">
+                    <span class="material-icons-outlined !text-sm">close</span>
+                  </button>
+                </div>
+              }
+            </div>
+          } @else {
+            <div class="flex flex-col items-center justify-center gap-2 py-8 text-center">
+              <span class="material-icons-outlined !text-4xl text-white/25">event_busy</span>
+              <p class="text-sm text-nav-muted">Drag a reel onto this day to schedule it.</p>
+            </div>
+          }
+        }
+
+        <div class="mt-4 overflow-hidden rounded-xl border border-white/10 bg-white/5">
+          <div class="border-b border-white/10 px-3 py-2">
+            <p class="text-[11px] font-medium text-nav-muted">Notes</p>
+          </div>
+          <textarea
+            class="h-28 w-full resize-none border-0 bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-nav-muted"
+            [ngModel]="schedule.noteFor(key)"
+            (ngModelChange)="schedule.setNote(key, $event)"
+            placeholder="Notes for this day…"
+            aria-label="Day notes"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+}

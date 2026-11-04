@@ -101,6 +101,12 @@ func (h *DumpHandler) saveView(userID int64, dir string, s models.Save) saveResp
 	return saveResponse{Save: s, Download: h.withMedia(userID, dir, s.ID, h.downloader.Status(dir, s.ID))}
 }
 
+// removeDownloadFiles deletes a save's files from the user's download folder.
+func (h *DumpHandler) removeDownloadFiles(r *http.Request, userID int64, saveID uint64) {
+	dir, _ := h.downloadDir(r, userID)
+	_ = h.downloader.RemoveFiles(dir, saveID)
+}
+
 // downloadStats is returned by GET /api/stats (all of the user's saves, Home and folders).
 type downloadStats struct {
 	TotalDownloads int            `json:"total_downloads"`
@@ -162,6 +168,40 @@ func (h *DumpHandler) AddToDump(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.addLink(w, r, userID, nil)
+}
+
+type dumpOrderRequest struct {
+	IDs []uint64 `json:"ids"`
+}
+
+// Reorder sets the Home board order of the user's Dump saves.
+func (h *DumpHandler) Reorder(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	var req dumpOrderRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, "invalid request body", nil)
+		return
+	}
+	if err := h.repo.ReorderDump(r.Context(), userID, req.IDs); err != nil {
+		if errors.Is(err, repository.ErrSaveOrder) {
+			utils.WriteError(w, http.StatusBadRequest, err.Error(), nil)
+			return
+		}
+		slog.Error("reorder dump failed", "user_id", userID, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "reorder dump failed", nil)
+		return
+	}
+	saves, err := h.repo.ListDump(r.Context(), userID)
+	if err != nil {
+		slog.Error("list dump failed", "user_id", userID, "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to load dump", nil)
+		return
+	}
+	utils.WriteSuccess(w, h.saveViews(r, userID, saves))
 }
 
 // addLink reads {url} from the body and saves it into folderID (nil = Dump).

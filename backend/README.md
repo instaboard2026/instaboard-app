@@ -10,7 +10,8 @@ brew install gallery-dl yt-dlp ffmpeg
 go run ./cmd/api
 ```
 
-The server listens on `127.0.0.1:8788`. The database (`~/.instaboard/instaboard.db`) and its schema are
+The server listens on `127.0.0.1:8788` in development. Packaged Mac builds (embedded UI) listen on
+`:4200` and open `http://localhost:4200/home`. The database (`~/.instaboard/instaboard.db`) and its schema are
 created on first run, and you're signed in automatically as your computer account.
 
 ## Settings
@@ -19,9 +20,9 @@ Everything has a default. To override, set environment variables or put them in 
 
 | Variable | Default |
 |----------|---------|
-| `PORT` | `8788` |
+| `PORT` | `8788` (packaged UI uses `4200` when `PORT` is unset) |
 | `HOST` | `127.0.0.1` |
-| `CORS_ORIGIN` | `http://localhost:5281` (the frontend dev server) |
+| `CORS_ORIGIN` | `http://localhost:5200` (the frontend dev server) |
 | `DB_PATH` | `~/.instaboard/instaboard.db` |
 | `DOWNLOAD_DIR` | `~/Movies/Instaboard` (can also be changed in the app) |
 | `COOKIES_FROM_BROWSER` | `chrome` (Instagram session to use; `none` to stay logged out) |
