@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,8 +23,12 @@ import (
 	corspkg "instaboard/internal/middleware"
 	"instaboard/internal/repository"
 	"instaboard/internal/service"
+	"instaboard/internal/ui"
 	"instaboard/migrations"
 )
+
+// Set at link time by scripts/build-mac.sh (-X main.version=...).
+var version = "dev"
 
 func main() {
 	// Optional overrides (PORT, DB_PATH, DOWNLOAD_DIR, ...); every setting has a default.
@@ -41,7 +49,7 @@ func main() {
 		slog.Error("database migration failed", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("database ready", "path", cfg.DBPath, "migrations_applied", applied)
+	slog.Info("database ready", "path", cfg.DBPath, "migrations_applied", applied, "version", version)
 	defer db.Close()
 
 	userRepo := repository.NewUserRepo(db)
@@ -54,6 +62,14 @@ func main() {
 	mediaSigner := service.NewMediaSigner(cfg.JWTSecret, cfg.BackendPublicURL, 24*time.Hour)
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
+
+	embeddedUI := ui.HasUI()
+	if embeddedUI {
+		// Same-origin UI — CORS origin matches the app URL (dev still uses CORS_ORIGIN).
+		if cfg.CORSHost == "http://localhost:5281" {
+			cfg.CORSHost = cfg.BackendPublicURL
+		}
+	}
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -90,10 +106,51 @@ func main() {
 		})
 	})
 
+	if embeddedUI {
+		r.NotFound(ui.Handler().ServeHTTP)
+	}
+
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	slog.Info("server starting", "addr", addr)
+	url := fmt.Sprintf("http://%s", addr)
+	if embeddedUI {
+		fmt.Fprintf(os.Stderr, "\n  Instaboard is running at %s\n  Keep this window open. Press Ctrl+C to quit.\n\n", url)
+	}
+	slog.Info("server starting", "addr", addr, "ui", embeddedUI)
+
+	if shouldOpenBrowser(embeddedUI) {
+		go openBrowser(url)
+	}
+
 	if err := http.ListenAndServe(addr, r); err != nil {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
+	}
+}
+
+func shouldOpenBrowser(embeddedUI bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("OPEN_BROWSER")))
+	switch v {
+	case "0", "false", "no":
+		return false
+	case "1", "true", "yes":
+		return true
+	default:
+		return embeddedUI
+	}
+}
+
+func openBrowser(url string) {
+	time.Sleep(400 * time.Millisecond)
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		slog.Warn("could not open browser", "err", err, "url", url)
 	}
 }

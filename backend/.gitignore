@@ -6,5 +6,9 @@
 /instaboard
 bin/
 
+# Embedded UI (placeholder index.html is kept; release build overwrites the rest)
+internal/ui/dist/**
+!internal/ui/dist/index.html
+
 # OS
 .DS_Store
