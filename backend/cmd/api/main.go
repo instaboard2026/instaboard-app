@@ -80,6 +80,7 @@ func main() {
 	mediaSigner := service.NewMediaSigner(cfg.JWTSecret, cfg.BackendPublicURL, 24*time.Hour)
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
+	calendarHandler := handler.NewCalendarHandler(repository.NewCalendarRepo(db))
 
 	var srv *http.Server
 	var restartAfter atomic.Bool
@@ -106,6 +107,10 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(corspkg.RequireJWT(cfg))
 			r.Get("/profile", profileHandler.GetProfile)
+			r.Get("/calendar", calendarHandler.Get)
+			r.Put("/calendar/saves/{id}", calendarHandler.Schedule)
+			r.Delete("/calendar/saves/{id}", calendarHandler.Unschedule)
+			r.Put("/calendar/notes/{date}", calendarHandler.SetNote)
 			r.Get("/dump", dumpHandler.GetDump)
 			r.Get("/stats", dumpHandler.Stats)
 			r.Post("/dump", dumpHandler.AddToDump)

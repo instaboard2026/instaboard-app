@@ -17,6 +17,11 @@ export class CacheService {
     localStorage.setItem(this.buildKey(key), JSON.stringify(item));
   }
 
+  removeItem(key: string): void {
+    if (!this.isBrowser) return;
+    localStorage.removeItem(this.buildKey(key));
+  }
+
   getItem<T>(key: string): T | null {
     if (!this.isBrowser) return null;
     const itemString = localStorage.getItem(this.buildKey(key));

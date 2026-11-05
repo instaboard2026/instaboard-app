@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { CalendarScheduleService } from '../../services/calendar-schedule.service';
-import { CardDragService } from '../../services/card-drag.service';
+import { CardDragService, isCalendarDrop } from '../../services/card-drag.service';
 import { DumpService, Save, SaveMedia } from '../../services/dump.service';
 
 interface CalendarCell {
@@ -13,12 +15,13 @@ interface CalendarCell {
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
-const MAX_THUMBS = 4;
+/** Portrait reels that fit a ~100px day cell without spilling into the next day. */
+const MAX_THUMBS = 2;
 
 @Component({
   selector: 'app-calendar-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, NgTemplateOutlet, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="flex h-full min-h-0 flex-col px-4 py-4 text-ink dark:text-slate-100">
@@ -60,7 +63,7 @@ const MAX_THUMBS = 4;
                 role="gridcell"
                 [attr.data-drop-calendar]="cell.key"
                 (click)="selectDay(cell)"
-                class="group relative flex min-h-[140px] flex-col rounded-xl border border-[#ebebeb] p-2.5 text-left transition-colors hover:bg-[#fafafa] dark:border-slate-800 dark:hover:bg-white/5 sm:min-h-[160px]"
+                class="group relative flex min-h-[140px] min-w-0 flex-col overflow-hidden rounded-xl border border-[#ebebeb] p-2.5 text-left transition-colors hover:bg-[#fafafa] dark:border-slate-800 dark:hover:bg-white/5 sm:min-h-[160px]"
                 [class.bg-rose-50]="cell.isSunday && selectedKey() !== cell.key"
                 [class.dark:bg-rose-500/10]="cell.isSunday && selectedKey() !== cell.key"
                 [class.border-rose-100]="cell.isSunday && selectedKey() !== cell.key"
@@ -70,63 +73,62 @@ const MAX_THUMBS = 4;
                 [class.dark:bg-blue-500/10]="selectedKey() === cell.key"
                 [class.ring-2]="cell.isToday || selectedKey() === cell.key || cardDrag.isCalendarHovered(cell.key)"
                 [class.ring-blue-500]="cell.isToday || selectedKey() === cell.key || cardDrag.isCalendarHovered(cell.key)">
-                <div class="flex items-center gap-1.5">
-                  <span
-                    class="text-sm font-semibold tabular-nums"
-                    [class.text-ink]="!cell.isSunday"
-                    [class.text-rose-600]="cell.isSunday"
-                    [class.dark:text-slate-100]="!cell.isSunday"
-                    [class.dark:text-rose-300]="cell.isSunday">
-                    {{ cell.day }}
-                  </span>
-                  <span
-                    class="text-xs font-medium uppercase tracking-wide"
-                    [class.text-ink-secondary]="!cell.isSunday"
-                    [class.dark:text-slate-500]="!cell.isSunday"
-                    [class.text-rose-500]="cell.isSunday"
-                    [class.dark:text-rose-300]="cell.isSunday">
-                    {{ cell.weekday }}
-                  </span>
+                <div class="flex items-start justify-between gap-1">
+                  <div class="min-w-0">
+                    <div
+                      class="text-sm font-semibold tabular-nums leading-none"
+                      [class.text-ink]="!cell.isSunday"
+                      [class.text-rose-600]="cell.isSunday"
+                      [class.dark:text-slate-100]="!cell.isSunday"
+                      [class.dark:text-rose-300]="cell.isSunday">
+                      {{ cell.day }}
+                    </div>
+                    <div
+                      class="mt-1 text-[10px] font-medium uppercase leading-none tracking-wide"
+                      [class.text-ink-secondary]="!cell.isSunday"
+                      [class.dark:text-slate-500]="!cell.isSunday"
+                      [class.text-rose-500]="cell.isSunday"
+                      [class.dark:text-rose-300]="cell.isSunday">
+                      {{ cell.weekday }}
+                    </div>
+                  </div>
                   @if (savesOn(cell.key).length; as n) {
                     @if (n > 0) {
                       <span
-                        class="ml-auto inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold tabular-nums text-white"
+                        class="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold tabular-nums text-white"
                         [attr.aria-label]="n + (n === 1 ? ' item scheduled' : ' items scheduled')">
                         {{ n }}
                       </span>
                     }
                   }
                 </div>
-                <div class="mt-2 flex min-h-0 flex-1 items-end gap-1.5">
-                  @for (save of savesOn(cell.key); track save.id; let i = $index) {
-                    @if (i < maxThumbs) {
-                      <div class="w-11 shrink-0 overflow-hidden rounded-lg bg-black shadow-sm ring-1 ring-blue-400/70 aspect-[9/16] dark:ring-blue-400/50">
-                        @if (thumb(save); as media) {
-                          @if (media.type === 'video') {
-                            <video
-                              [src]="media.url"
-                              muted
-                              playsinline
-                              preload="metadata"
-                              draggable="false"
-                              class="pointer-events-none h-full w-full object-cover"></video>
+                @if (savesOn(cell.key); as daySaves) {
+                  @if (daySaves.length > 0) {
+                    <div class="mt-auto flex w-full min-w-0 items-end gap-1 overflow-hidden pt-2">
+                      @for (save of daySaves.slice(0, maxThumbs); track save.id) {
+                        <div class="aspect-[9/16] min-w-0 max-w-11 flex-1 basis-0 overflow-hidden rounded-md bg-black shadow-sm ring-1 ring-blue-400/70 dark:ring-blue-400/50">
+                          @if (thumb(save); as media) {
+                            @if (media.type === 'video') {
+                              <video
+                                [src]="media.url"
+                                muted
+                                playsinline
+                                preload="metadata"
+                                draggable="false"
+                                class="pointer-events-none h-full w-full object-cover"></video>
+                            } @else {
+                              <img [src]="media.url" alt="" draggable="false" class="pointer-events-none h-full w-full object-cover" />
+                            }
                           } @else {
-                            <img [src]="media.url" alt="" draggable="false" class="pointer-events-none h-full w-full object-cover" />
+                            <div class="flex h-full items-center justify-center bg-[#f5f6f7] dark:bg-slate-800">
+                              <span class="material-icons-outlined !text-base text-slate-400">movie</span>
+                            </div>
                           }
-                        } @else {
-                          <div class="flex h-full items-center justify-center bg-[#f5f6f7] dark:bg-slate-800">
-                            <span class="material-icons-outlined !text-lg text-slate-400">movie</span>
-                          </div>
-                        }
-                      </div>
-                    }
+                        </div>
+                      }
+                    </div>
                   }
-                  @if (savesOn(cell.key).length > maxThumbs) {
-                    <span class="mb-1 text-xs font-semibold text-blue-600 dark:text-blue-300">
-                      +{{ savesOn(cell.key).length - maxThumbs }}
-                    </span>
-                  }
-                </div>
+                }
               </button>
             }
           </div>
@@ -149,26 +151,38 @@ const MAX_THUMBS = 4;
             </div>
             @if (savesOn(key); as daySaves) {
               @if (daySaves.length > 0) {
-                <div class="flex gap-2 overflow-x-auto border-b border-[#ebebeb] px-4 py-3 dark:border-slate-800">
+                <div
+                  cdkDropList
+                  cdkDropListSortingDisabled
+                  class="flex flex-wrap gap-2 border-b border-[#ebebeb] px-4 py-3 dark:border-slate-800">
                   @for (save of daySaves; track save.id) {
-                    <div class="w-14 shrink-0 overflow-hidden rounded-xl bg-black ring-1 ring-blue-400/70 aspect-[9/16]">
-                      @if (thumb(save); as media) {
-                        @if (media.type === 'video') {
-                          <video
-                            [src]="media.url"
-                            muted
-                            playsinline
-                            preload="metadata"
-                            draggable="false"
-                            class="pointer-events-none h-full w-full object-cover"></video>
-                        } @else {
-                          <img [src]="media.url" alt="" draggable="false" class="pointer-events-none h-full w-full object-cover" />
-                        }
-                      } @else {
-                        <div class="flex h-full items-center justify-center bg-[#f5f6f7] dark:bg-slate-800">
-                          <span class="material-icons-outlined !text-xl text-slate-400">movie</span>
+                    <div
+                      cdkDrag
+                      [cdkDragData]="save"
+                      [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+                      (cdkDragStarted)="onReelDragStarted(save)"
+                      (cdkDragMoved)="onReelDragMoved($event)"
+                      (cdkDragEnded)="onReelDragEnded(save, $event)"
+                      tabindex="0"
+                      aria-label="Drag to another day"
+                      class="relative w-14 shrink-0 cursor-grab active:cursor-grabbing">
+                      <ng-container *ngTemplateOutlet="reelFace; context: { $implicit: save }" />
+                      <ng-template cdkDragPreview>
+                        <div class="w-14 shadow-2xl">
+                          <ng-container *ngTemplateOutlet="reelFace; context: { $implicit: save }" />
                         </div>
-                      }
+                      </ng-template>
+                      <button
+                        type="button"
+                        (pointerdown)="$event.stopPropagation()"
+                        (mousedown)="$event.stopPropagation()"
+                        (click)="unschedule(save.id, $event)"
+                        title="Remove from this day"
+                        aria-label="Remove from this day"
+                        class="absolute -right-1.5 -top-1.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-nav-bg text-nav-muted ring-1 ring-white/20 hover:bg-red-600 hover:text-white">
+                        <span class="material-icons-outlined !text-sm">close</span>
+                      </button>
+                      <div *cdkDragPlaceholder class="w-14 rounded-xl border-2 border-dashed border-blue-400/50 aspect-[9/16]"></div>
                     </div>
                   }
                 </div>
@@ -190,6 +204,28 @@ const MAX_THUMBS = 4;
         </aside>
       </div>
     </div>
+
+    <ng-template #reelFace let-save>
+      <div class="overflow-hidden rounded-xl bg-black ring-1 ring-blue-400/70 aspect-[9/16]">
+        @if (thumb(save); as media) {
+          @if (media.type === 'video') {
+            <video
+              [src]="media.url"
+              muted
+              playsinline
+              preload="metadata"
+              draggable="false"
+              class="pointer-events-none h-full w-full object-cover"></video>
+          } @else {
+            <img [src]="media.url" alt="" draggable="false" class="pointer-events-none h-full w-full object-cover" />
+          }
+        } @else {
+          <div class="flex h-full items-center justify-center bg-[#f5f6f7] dark:bg-slate-800">
+            <span class="material-icons-outlined !text-xl text-slate-400">movie</span>
+          </div>
+        }
+      </div>
+    </ng-template>
   `,
 })
 export class CalendarPageComponent {
@@ -258,6 +294,30 @@ export class CalendarPageComponent {
 
   clearSelection(): void {
     this.selectedKey.set(null);
+  }
+
+  unschedule(saveId: number, event: Event): void {
+    event.stopPropagation();
+    this.schedule.unschedule(saveId);
+  }
+
+  onReelDragStarted(save: Save): void {
+    this.cardDrag.dragging.set(save);
+  }
+
+  onReelDragMoved(event: CdkDragMove<Save>): void {
+    const target = this.cardDrag.targetAt(event.pointerPosition.x, event.pointerPosition.y);
+    this.cardDrag.hoverTarget.set(isCalendarDrop(target) ? target : null);
+  }
+
+  /** Dropping on a different day moves the reel. Same day, or anywhere else, leaves it. */
+  onReelDragEnded(save: Save, event: CdkDragEnd<Save>): void {
+    const target =
+      this.cardDrag.targetAt(event.dropPoint.x, event.dropPoint.y) ?? this.cardDrag.hoverTarget();
+    this.cardDrag.dragging.set(null);
+    this.cardDrag.hoverTarget.set(null);
+    if (!isCalendarDrop(target) || target.date === this.schedule.dateFor(save.id)) return;
+    this.schedule.schedule(save.id, target.date);
   }
 }
 
