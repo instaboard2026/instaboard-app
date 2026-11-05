@@ -10,7 +10,7 @@ import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { Title } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, from, map, of } from 'rxjs';
-import { catchError, concatMap, toArray } from 'rxjs/operators';
+import { catchError, concatMap, finalize, tap, toArray } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 import { DownloadStats, DumpService, MoveTarget, Save, SaveScope, SaveSource } from '../../services/dump.service';
 import { FoldersService } from '../../services/folders.service';
@@ -117,10 +117,22 @@ export class DumpPageComponent {
 
   saves = computed(() => this.dumpService.listFor(this.scope()));
   count = computed(() => this.saves().length);
+  /** Instagram saves with no file yet and no failure this session. */
+  readonly pendingDownloads = computed(() =>
+    this.saves().filter((save) => this.canDownload(save) && !save.download && !this.downloadErrors().has(save.id))
+  );
+  /** Instagram saves that failed to download and still have no file. */
+  readonly failedDownloads = computed(() =>
+    this.saves().filter((save) => this.canDownload(save) && !save.download && this.downloadErrors().has(save.id))
+  );
   loading = computed(() => this.dumpService.isLoading(this.scope()) && !this.dumpService.isLoaded(this.scope()));
   copiedId = signal<number | null>(null);
   downloadingIds = signal<ReadonlySet<number>>(new Set());
   downloadErrors = signal<ReadonlyMap<number, string>>(new Map());
+  /** True while Download all is walking its queue. */
+  downloadingAll = signal(false);
+  /** True while Retry failed is walking its queue. */
+  retryingFailed = signal(false);
   revealingId = signal<number | null>(null);
   revealError = signal<string | null>(null);
 
@@ -246,6 +258,13 @@ export class DumpPageComponent {
 
   setPerRow(n: PerRow): void {
     this.perRow.set(n);
+  }
+
+  /** Enter saves, the same as the arrow button. Shift+Enter keeps a new line for more links. */
+  onLinkKeydown(ev: KeyboardEvent): void {
+    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing || ev.repeat) return;
+    ev.preventDefault();
+    this.addLink();
   }
 
   addLink(): void {
@@ -394,25 +413,67 @@ export class DumpPageComponent {
   }
 
   download(save: Save): void {
-    if (this.downloadingIds().has(save.id)) return;
-    this.downloadingIds.update((ids) => new Set(ids).add(save.id));
-    this.setDownloadError(save.id, null);
+    this.downloadOne(save).subscribe();
+  }
+
+  /** Queues Instagram saves that are not downloaded and have not failed this session. */
+  downloadAll(): void {
+    if (this.downloadingAll()) return;
+    const targets = this.pendingDownloads();
+    if (!targets.length) return;
+    this.downloadMany(targets, 'all');
+  }
+
+  /** Queues only saves whose last download attempt failed. */
+  retryFailed(): void {
+    if (this.retryingFailed()) return;
+    const targets = this.failedDownloads();
+    if (!targets.length) return;
+    this.downloadMany(targets, 'failed');
+  }
+
+  /** One download at a time, same request and error tracking as a card click. */
+  private downloadMany(saves: Save[], kind: 'all' | 'failed'): void {
+    if (kind === 'all') this.downloadingAll.set(true);
+    else this.retryingFailed.set(true);
+    const finish = () => {
+      if (kind === 'all') this.downloadingAll.set(false);
+      else this.retryingFailed.set(false);
+    };
+    from(saves)
+      .pipe(
+        concatMap((save) => this.downloadOne(save)),
+        toArray(),
+        finalize(finish)
+      )
+      .subscribe();
+  }
+
+  private downloadOne(save: Save) {
+    const current = this.saves().find((item) => item.id === save.id) ?? save;
+    if (this.downloadingIds().has(current.id) || current.download || !this.canDownload(current)) {
+      return of(undefined);
+    }
+    this.downloadingIds.update((ids) => new Set(ids).add(current.id));
+    this.setDownloadError(current.id, null);
     const done = () =>
       this.downloadingIds.update((ids) => {
         const next = new Set(ids);
-        next.delete(save.id);
+        next.delete(current.id);
         return next;
       });
-    this.dumpService.download(save.id).subscribe({
-      next: () => {
+    return this.dumpService.download(current.id).pipe(
+      tap(() => {
         done();
         if (this.scope() === 'dump') this.loadStats();
-      },
-      error: (err: Error) => {
+      }),
+      map(() => undefined),
+      catchError((err: Error) => {
         done();
-        this.setDownloadError(save.id, err.message);
-      },
-    });
+        this.setDownloadError(current.id, err.message);
+        return of(undefined);
+      })
+    );
   }
 
   private setDownloadError(id: number, message: string | null): void {

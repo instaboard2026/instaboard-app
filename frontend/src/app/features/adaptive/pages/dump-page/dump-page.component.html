@@ -40,6 +40,7 @@
           placeholder="Paste one or many Instagram, Pinterest or YouTube links…"
           autocomplete="off"
           aria-label="Links to save"
+          (keydown)="onLinkKeydown($event)"
           class="w-full resize-y min-h-[4.5rem] border-0 bg-transparent px-0.5 pt-0.5 pb-3 text-sm text-ink dark:text-white placeholder:text-ink-placeholder outline-none shadow-none focus:border-0 focus:outline-none focus:ring-0"></textarea>
         <div class="flex items-center gap-2">
           <span class="hidden sm:inline-flex items-center gap-2 pl-0.5" role="img" aria-label="Supports Instagram, Pinterest and YouTube">
@@ -89,6 +90,28 @@
         <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
       <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), import a .txt file, or drop a screenshot onto the board.</p>
+      @if (isLoggedIn()) {
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            (click)="downloadAll()"
+            [disabled]="downloadingAll() || pendingDownloads().length === 0"
+            [title]="pendingDownloads().length + ' not downloaded'"
+            class="inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-sm font-semibold text-ink dark:text-slate-100 ring-1 ring-[#e3e3e3] dark:ring-slate-600 hover:bg-[#fafafa] dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+            <span class="material-icons-outlined !text-base" [class.animate-spin]="downloadingAll()">{{ downloadingAll() ? 'progress_activity' : 'download' }}</span>
+            Download all
+          </button>
+          <button
+            type="button"
+            (click)="retryFailed()"
+            [disabled]="retryingFailed() || failedDownloads().length === 0"
+            [title]="failedDownloads().length + ' failed'"
+            class="inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-sm font-semibold text-ink dark:text-slate-100 ring-1 ring-[#e3e3e3] dark:ring-slate-600 hover:bg-[#fafafa] dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+            <span class="material-icons-outlined !text-base" [class.animate-spin]="retryingFailed()">{{ retryingFailed() ? 'progress_activity' : 'refresh' }}</span>
+            Retry failed
+          </button>
+        </div>
+      }
     </div>
   } @else {
       <!-- Folder / Bin header: title + count, per-row switch, Add link or Empty Bin -->
@@ -446,6 +469,7 @@
         (ngModelChange)="linkInput.set($event); addError.set(null)"
         placeholder="Paste one or many Instagram, Pinterest or YouTube links…"
         autocomplete="off"
+        (keydown)="onLinkKeydown($event)"
         class="mt-4 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 text-base placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none resize-y"></textarea>
       @if (addError()) {
         <p class="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
