@@ -24,7 +24,7 @@ import { LocalSessionService } from '../../services/local-session.service';
 import { CacheService } from '../../services/cache.service';
 import { MediaCarouselComponent } from '../../shared/components/media-carousel/media-carousel.component';
 import { AutofocusSelectDirective } from '../../shared/directives/autofocus-select.directive';
-import { extractPasteLinks } from '../../shared/utils/paste-links';
+import { ImportLinkRow, parseImportRows } from '../../shared/utils/paste-links';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
@@ -142,6 +142,10 @@ export class DumpPageComponent {
   addError = signal<string | null>(null);
   /** Add-link popup on folder pages. */
   addDialogOpen = signal(false);
+  /** Review detected links (from File or multi-link Go) before saving. */
+  importDialogOpen = signal(false);
+  importRows = signal<ImportLinkRow[]>([]);
+  readonly selectedImportCount = computed(() => this.importRows().filter((r) => r.selected).length);
   /** Card metadata popup (source, when saved, download status, link actions). */
   detailsSave = signal<Save | null>(null);
   loadError = signal<string | null>(null);
@@ -176,6 +180,8 @@ export class DumpPageComponent {
     this.loadError.set(null);
     this.downloadErrors.set(new Map());
     this.addDialogOpen.set(false);
+    this.importDialogOpen.set(false);
+    this.importRows.set([]);
     this.detailsSave.set(null);
     if (scope === 'dump') this.loadStats();
     this.dumpService.load(scope).subscribe({
@@ -224,7 +230,7 @@ export class DumpPageComponent {
     input.focus();
   }
 
-  /** Load links from a .txt / .csv file into the box (same bulk parser as paste). */
+  /** Parse a .txt / .csv and open the import-review popup with detected links. */
   onLinksFile(ev: Event): void {
     const input = ev.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -237,8 +243,13 @@ export class DumpPageComponent {
         this.addError.set('That file was empty.');
         return;
       }
-      this.linkInput.set(text);
+      const rows = parseImportRows(text);
+      if (rows.length === 0) {
+        this.addError.set('No Instagram, YouTube or Pinterest links found in that file.');
+        return;
+      }
       this.addError.set(null);
+      this.openImportPreview(rows);
     };
     reader.onerror = () => this.addError.set('Could not read that file.');
     reader.readAsText(file);
@@ -274,11 +285,57 @@ export class DumpPageComponent {
       this.addError.set("Instaboard isn't connected yet. Try again in a moment.");
       return;
     }
-    const urls = extractPasteLinks(raw);
-    if (urls.length === 0) {
+    const rows = parseImportRows(raw);
+    if (rows.length === 0) {
       this.addError.set('No Instagram, YouTube or Pinterest links found. Paste one or more URLs.');
       return;
     }
+    if (rows.length === 1) {
+      this.saveUrls([rows[0].url]);
+      return;
+    }
+    this.openImportPreview(rows);
+  }
+
+  openImportPreview(rows: ImportLinkRow[]): void {
+    this.importRows.set(rows.map((r) => ({ ...r, selected: r.selected !== false })));
+    this.addError.set(null);
+    this.importDialogOpen.set(true);
+  }
+
+  closeImportDialog(): void {
+    if (this.adding()) return;
+    this.importDialogOpen.set(false);
+    this.importRows.set([]);
+  }
+
+  toggleImportRow(index: number): void {
+    this.importRows.update((rows) =>
+      rows.map((r, i) => (i === index ? { ...r, selected: !r.selected } : r))
+    );
+  }
+
+  setAllImportSelected(selected: boolean): void {
+    this.importRows.update((rows) => rows.map((r) => ({ ...r, selected })));
+  }
+
+  /** Save checked rows from the import-review popup. */
+  confirmImportLinks(): void {
+    if (this.adding()) return;
+    if (!this.isLoggedIn()) {
+      this.addError.set("Instaboard isn't connected yet. Try again in a moment.");
+      return;
+    }
+    const urls = this.importRows().filter((r) => r.selected).map((r) => r.url);
+    if (urls.length === 0) {
+      this.addError.set('Select at least one link to add.');
+      return;
+    }
+    this.saveUrls(urls);
+  }
+
+  /** Sequential POST for each URL; used by single-link Go and import confirm. */
+  private saveUrls(urls: string[]): void {
     this.adding.set(true);
     this.addError.set(null);
     const scope = this.scope();
@@ -300,6 +357,22 @@ export class DumpPageComponent {
           if (failed.length === 0) {
             this.linkInput.set('');
             this.addDialogOpen.set(false);
+            this.importDialogOpen.set(false);
+            this.importRows.set([]);
+            return;
+          }
+          if (this.importDialogOpen()) {
+            const failedSet = new Set(failed.map((f) => f.url.toLowerCase()));
+            this.importRows.update((rows) =>
+              rows
+                .filter((r) => failedSet.has(r.url.toLowerCase()))
+                .map((r) => ({ ...r, selected: true }))
+            );
+            this.addError.set(
+              ok > 0
+                ? `Saved ${ok} of ${results.length}. ${failed[0].error}`
+                : failed[0].error || 'Could not save these links.'
+            );
             return;
           }
           if (ok > 0) {
@@ -357,6 +430,10 @@ export class DumpPageComponent {
   onEscape(): void {
     if (this.detailsSave()) {
       this.closeDetails();
+      return;
+    }
+    if (this.importDialogOpen()) {
+      this.closeImportDialog();
       return;
     }
     if (this.addDialogOpen()) this.closeAddDialog();

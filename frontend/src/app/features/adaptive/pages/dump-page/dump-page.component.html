@@ -89,7 +89,7 @@
       @if (addError()) {
         <p class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
-      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), import a .txt file, or drop a screenshot onto the board.</p>
+      <p class="mt-3 text-xs text-ink-secondary dark:text-slate-400">Paste many links at once (commas optional), import a .txt or .csv to review detected links, or drop a screenshot onto the board.</p>
       @if (isLoggedIn()) {
         <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
           <button
@@ -471,13 +471,13 @@
         autocomplete="off"
         (keydown)="onLinkKeydown($event)"
         class="mt-4 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 text-base placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none resize-y"></textarea>
-      @if (addError()) {
+      @if (addError() && !importDialogOpen()) {
         <p class="mt-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
       }
       <div class="mt-5 flex flex-wrap items-center justify-between gap-2">
         <label class="inline-flex cursor-pointer items-center gap-1 text-sm font-medium text-slate-600 dark:text-slate-300 hover:underline">
           <span class="material-icons-outlined !text-base">upload_file</span>
-          Import .txt
+          Import .txt / .csv
           <input type="file" accept=".txt,.csv,text/plain" class="sr-only" (change)="onLinksFile($event)" />
         </label>
         <div class="flex gap-2">
@@ -492,5 +492,72 @@
         </div>
       </div>
     </form>
+  </div>
+}
+
+<!-- Import review: Sl No + Post URL before saving -->
+@if (importDialogOpen()) {
+  <div class="fixed inset-0 z-[1010] flex items-start justify-center p-4 pt-[10vh]" role="dialog" aria-modal="true" aria-labelledby="import-links-title">
+    <div class="absolute inset-0 bg-black/60" (click)="closeImportDialog()"></div>
+    <div class="relative flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xl">
+      <div class="flex items-start justify-between gap-4 border-b border-slate-200 dark:border-slate-700 px-6 py-4">
+        <div>
+          <h2 id="import-links-title" class="text-lg font-bold">Import {{ importRows().length }} links</h2>
+          <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Review detected links, then add the ones you want to {{ heading() }}.</p>
+        </div>
+        <button type="button" (click)="closeImportDialog()" [disabled]="adding()" aria-label="Close" class="-m-1 p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">
+          <span class="material-icons-outlined">close</span>
+        </button>
+      </div>
+      <div class="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 px-6 py-2 text-sm">
+        <button type="button" (click)="setAllImportSelected(true)" class="font-medium text-blue-600 hover:underline dark:text-blue-400">Select all</button>
+        <span class="text-slate-300 dark:text-slate-600">·</span>
+        <button type="button" (click)="setAllImportSelected(false)" class="font-medium text-slate-600 hover:underline dark:text-slate-300">Select none</button>
+        <span class="ml-auto text-slate-500 dark:text-slate-400">{{ selectedImportCount() }} selected</span>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto px-2 sm:px-4">
+        <table class="w-full text-left text-sm">
+          <thead class="sticky top-0 bg-white dark:bg-slate-900">
+            <tr class="border-b border-slate-200 dark:border-slate-700 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <th class="w-10 py-2 pl-2 font-semibold" scope="col">
+                <span class="sr-only">Select</span>
+              </th>
+              <th class="w-16 py-2 font-semibold" scope="col">Sl No</th>
+              <th class="py-2 pr-2 font-semibold" scope="col">Post URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of importRows(); track row.url; let i = $index) {
+              <tr class="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                <td class="py-2 pl-2 align-middle">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30"
+                    [checked]="row.selected"
+                    (change)="toggleImportRow(i)"
+                    [attr.aria-label]="'Select link ' + row.slNo" />
+                </td>
+                <td class="py-2 align-middle tabular-nums text-slate-600 dark:text-slate-300">{{ row.slNo }}</td>
+                <td class="py-2 pr-2 align-middle break-all font-mono text-xs text-slate-800 dark:text-slate-200">{{ row.url }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (addError()) {
+        <p class="border-t border-slate-100 dark:border-slate-800 px-6 py-2 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
+      }
+      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700 px-6 py-4">
+        <button type="button" (click)="closeImportDialog()" [disabled]="adding()" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50">Cancel</button>
+        <button
+          type="button"
+          (click)="confirmImportLinks()"
+          [disabled]="adding() || selectedImportCount() === 0"
+          class="px-4 py-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold">
+          <span class="material-icons-outlined !text-lg" [class.animate-spin]="adding()">{{ adding() ? 'progress_activity' : 'add' }}</span>
+          {{ adding() ? 'Adding…' : 'Add ' + selectedImportCount() + ' links' }}
+        </button>
+      </div>
+    </div>
   </div>
 }
