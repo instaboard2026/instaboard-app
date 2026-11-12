@@ -35,6 +35,12 @@ export interface Save {
   created_at: string;
   /** Set when the save is in the Bin (soft-deleted). */
   deleted_at?: string | null;
+  /** Instagram engagement snapshot at download time (absent until downloaded). */
+  like_count?: number | null;
+  comment_count?: number | null;
+  repost_count?: number | null;
+  share_count?: number | null;
+  play_count?: number | null;
   /** null = not downloaded yet. */
   download: SaveDownload | null;
 }

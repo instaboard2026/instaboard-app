@@ -14,10 +14,11 @@ import { catchError, concatMap, finalize, tap, toArray } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 import { DownloadStats, DumpService, MoveTarget, Save, SaveScope, SaveSource } from '../../services/dump.service';
 import { FoldersService } from '../../services/folders.service';
-import { CardDragService, isCalendarDrop } from '../../services/card-drag.service';
+import { CardDragService, isCalendarDrop, isSplitDrop } from '../../services/card-drag.service';
 import { CalendarScheduleService } from '../../services/calendar-schedule.service';
 import { PlaybackService } from '../../services/playback.service';
 import { ConfirmDialogService } from '../../services/confirm-dialog.service';
+import { SplitService } from '../../services/split.service';
 import { CdkDrag, CdkDragDrop, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { UserContextService } from '../../services/user-context.service';
 import { LocalSessionService } from '../../services/local-session.service';
@@ -29,6 +30,16 @@ import { ImportLinkRow, parseImportRows } from '../../shared/utils/paste-links';
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
 type PerRow = (typeof PER_ROW_OPTIONS)[number];
+
+/** Board filter: downloaded media shape (undownloaded cards only appear under All). */
+type MediaFilter = 'all' | 'video' | 'carousel' | 'image';
+
+const MEDIA_FILTERS: readonly { id: MediaFilter; icon: string; label: string }[] = [
+  { id: 'all', icon: 'apps', label: 'All' },
+  { id: 'video', icon: 'movie', label: 'Videos' },
+  { id: 'carousel', icon: 'view_carousel', label: 'Carousels' },
+  { id: 'image', icon: 'image', label: 'Single image' },
+];
 
 const SOURCE_BADGE: Record<SaveSource, string> = {
   instagram: 'IG',
@@ -60,6 +71,7 @@ export class DumpPageComponent {
   private title = inject(Title);
   private cardDrag = inject(CardDragService);
   readonly calendarSchedule = inject(CalendarScheduleService);
+  private splitService = inject(SplitService);
   private playback = inject(PlaybackService);
   private confirm = inject(ConfirmDialogService);
   private userContext = inject(UserContextService);
@@ -67,6 +79,7 @@ export class DumpPageComponent {
   private cacheService = inject(CacheService);
 
   readonly perRowOptions = PER_ROW_OPTIONS;
+  readonly mediaFilters = MEDIA_FILTERS;
 
   isLoggedIn = this.userContext.isLoggedIn;
   readonly sessionStatus = this.session.status;
@@ -116,6 +129,15 @@ export class DumpPageComponent {
   );
 
   saves = computed(() => this.dumpService.listFor(this.scope()));
+  /** Active media-type filter for the board grid. */
+  mediaFilter = signal<MediaFilter>('all');
+  /** Saves visible in the grid after the media-type filter. */
+  visibleSaves = computed(() => {
+    const filter = this.mediaFilter();
+    const list = this.saves();
+    if (filter === 'all') return list;
+    return list.filter((save) => mediaKind(save) === filter);
+  });
   count = computed(() => this.saves().length);
   /** Instagram saves with no file yet and no failure this session. */
   readonly pendingDownloads = computed(() =>
@@ -148,6 +170,8 @@ export class DumpPageComponent {
   readonly selectedImportCount = computed(() => this.importRows().filter((r) => r.selected).length);
   /** Card metadata popup (source, when saved, download status, link actions). */
   detailsSave = signal<Save | null>(null);
+  /** Reel durations (seconds) keyed by save id, from video metadata. */
+  private reelDurations = signal<ReadonlyMap<number, number>>(new Map());
   loadError = signal<string | null>(null);
   /** True while dragging image files over the board (not CDK card drags). */
   fileDragOver = signal(false);
@@ -164,6 +188,7 @@ export class DumpPageComponent {
     // Load whenever the page switches between the Dump and a folder (the component is reused).
     effect(() => {
       this.scope();
+      untracked(() => this.mediaFilter.set('all'));
       if (this.isLoggedIn()) untracked(() => this.reload());
     });
     // A folder that no longer exists (deleted, or a stale link) goes back to the Dump.
@@ -270,6 +295,21 @@ export class DumpPageComponent {
   setPerRow(n: PerRow): void {
     this.perRow.set(n);
   }
+
+  setMediaFilter(filter: MediaFilter): void {
+    this.mediaFilter.set(filter);
+  }
+
+  /** Counts per media filter (for button titles). */
+  readonly mediaFilterCounts = computed(() => {
+    const list = this.saves();
+    const counts: Record<MediaFilter, number> = { all: list.length, video: 0, carousel: 0, image: 0 };
+    for (const save of list) {
+      const kind = mediaKind(save);
+      if (kind) counts[kind] += 1;
+    }
+    return counts;
+  });
 
   /** Enter saves, the same as the arrow button. Shift+Enter keeps a new line for more links. */
   onLinkKeydown(ev: KeyboardEvent): void {
@@ -401,6 +441,21 @@ export class DumpPageComponent {
     this.addError.set(null);
   }
 
+  setReelDuration(saveId: number, sec: number): void {
+    if (!Number.isFinite(sec) || sec <= 0) return;
+    const prev = this.reelDurations().get(saveId);
+    if (prev !== undefined && Math.abs(prev - sec) < 0.05) return;
+    const next = new Map(this.reelDurations());
+    next.set(saveId, sec);
+    this.reelDurations.set(next);
+  }
+
+  reelDurationLabel(saveId: number): string | null {
+    const sec = this.reelDurations().get(saveId);
+    if (sec === undefined) return null;
+    return formatReelDuration(sec);
+  }
+
   openDetails(save: Save): void {
     this.revealError.set(null);
     this.detailsSave.set(save);
@@ -449,9 +504,9 @@ export class DumpPageComponent {
     this.cardDrag.hoverTarget.set(this.resolveDropTarget(event.pointerPosition.x, event.pointerPosition.y));
   }
 
-  /** Drop within the board: shuffle order on Home / folders (not the Bin). */
+  /** Drop within the board: shuffle order on Home / folders (not the Bin or a filtered view). */
   onCardDropped(event: CdkDragDrop<Save[]>): void {
-    if (this.isBin() || this.cardDrag.hoverTarget() !== null) return;
+    if (this.isBin() || this.mediaFilter() !== 'all' || this.cardDrag.hoverTarget() !== null) return;
     if (event.previousIndex === event.currentIndex) return;
     const scope = this.scope();
     if (scope === 'bin') return;
@@ -460,7 +515,7 @@ export class DumpPageComponent {
     });
   }
 
-  /** Calendar day: schedule in place. Bin: soft-delete. From Bin onto Home/folder: restore. Else move. */
+  /** Calendar day: schedule. Split: copy into analysis (Home stays). Bin: soft-delete. Else move/restore. */
   onCardDragEnded(save: Save, event: CdkDragEnd<Save>): void {
     // Prefer the release point — last move can miss when the pointer is over the fixed pane.
     const target =
@@ -472,6 +527,16 @@ export class DumpPageComponent {
       this.calendarSchedule.schedule(save.id, target.date);
       return;
     }
+    if (isSplitDrop(target)) {
+      this.splitService.createFromSave(save.id).subscribe({
+        next: () => {
+          this.foldersService.showNotice('Added to Split video');
+          void this.router.navigateByUrl('/split');
+        },
+        error: (err: Error) => this.foldersService.showNotice(err.message),
+      });
+      return;
+    }
     if (target === 'bin') {
       if (this.scope() !== 'bin') this.foldersService.deleteSave(save);
     } else if (target !== null) {
@@ -481,11 +546,11 @@ export class DumpPageComponent {
     }
   }
 
-  /** Folder/bin targets ignore the current board scope; calendar days always count. */
+  /** Folder/bin targets ignore the current board scope; calendar and split always count. */
   private resolveDropTarget(x: number, y: number) {
     const target = this.cardDrag.targetAt(x, y);
     if (target === null) return null;
-    if (isCalendarDrop(target)) return target;
+    if (isCalendarDrop(target) || isSplitDrop(target)) return target;
     return target !== this.scope() ? target : null;
   }
 
@@ -687,6 +752,28 @@ function copyWithTextarea(text: string): boolean {
   }
   el.remove();
   return ok;
+}
+
+/** Formats a reel length as m:ss (or h:mm:ss for longer clips). */
+function formatReelDuration(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Classifies a save by downloaded media: video, carousel (2+), or single image. */
+function mediaKind(save: Save): MediaFilter | null {
+  const d = save.download;
+  if (!d) return null;
+  const media = d.media ?? [];
+  if (media.length > 1 || (d.kind === 'post' && d.files > 1)) return 'carousel';
+  if (d.kind === 'video' || (media.length === 1 && media[0].type === 'video')) return 'video';
+  if (media.length === 1 && media[0].type === 'image') return 'image';
+  if (d.kind === 'post' && d.files === 1) return 'image';
+  return null;
 }
 
 function dragHasFiles(ev: DragEvent): boolean {

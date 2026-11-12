@@ -136,6 +136,62 @@ func TestDownloadToolMissing(t *testing.T) {
 	}
 }
 
+func TestEngagementFromMediaInfoJSON(t *testing.T) {
+	raw := []byte(`{
+		"items": [{
+			"like_count": 52,
+			"comment_count": 7,
+			"media_repost_count": 6,
+			"reshare_count": 37,
+			"play_count": 2345,
+			"ig_play_count": 2345
+		}],
+		"status": "ok"
+	}`)
+	eng := engagementFromMediaInfoJSON(raw)
+	if eng == nil {
+		t.Fatal("expected engagement")
+	}
+	if eng.LikeCount == nil || *eng.LikeCount != 52 {
+		t.Fatalf("likes = %v", eng.LikeCount)
+	}
+	if eng.CommentCount == nil || *eng.CommentCount != 7 {
+		t.Fatalf("comments = %v", eng.CommentCount)
+	}
+	if eng.RepostCount == nil || *eng.RepostCount != 6 {
+		t.Fatalf("reposts = %v", eng.RepostCount)
+	}
+	if eng.ShareCount == nil || *eng.ShareCount != 37 {
+		t.Fatalf("shares = %v", eng.ShareCount)
+	}
+	if eng.PlayCount == nil || *eng.PlayCount != 2345 {
+		t.Fatalf("plays = %v", eng.PlayCount)
+	}
+}
+
+func TestParseEngagementFromPages(t *testing.T) {
+	dir := t.TempDir()
+	name := "01_https_www.instagram.com_api_v1_media_123_info_.txt"
+	raw := `{"items":[{"like_count":10,"comment_count":2,"media_repost_count":1,"reshare_count":3,"ig_play_count":99}],"status":"ok"}`
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "1.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := parseEngagementFromPages(dir)
+	if eng == nil || eng.LikeCount == nil || *eng.LikeCount != 10 {
+		t.Fatalf("engagement = %+v", eng)
+	}
+	removeGalleryDLPages(dir)
+	if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+		t.Fatalf("page dump should be removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "1.mp4")); err != nil {
+		t.Fatalf("media should remain: %v", err)
+	}
+}
+
 func TestDetectYTDLModule(t *testing.T) {
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		t.Skip("yt-dlp not installed")

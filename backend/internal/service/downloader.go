@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,15 @@ var (
 	ErrDownloadTimeout = errors.New("the download took too long and was stopped")
 )
 
+// EngagementCounts is a snapshot of Instagram metrics from media-info at download time.
+type EngagementCounts struct {
+	LikeCount    *int64 `json:"like_count,omitempty"`
+	CommentCount *int64 `json:"comment_count,omitempty"`
+	RepostCount  *int64 `json:"repost_count,omitempty"`
+	ShareCount   *int64 `json:"share_count,omitempty"`
+	PlayCount    *int64 `json:"play_count,omitempty"`
+}
+
 // DownloadState describes what's saved in the download folder for one save.
 type DownloadState struct {
 	Kind  string      `json:"kind"`
@@ -39,6 +49,8 @@ type DownloadState struct {
 	Media []MediaItem `json:"media,omitempty"`
 	// Path is the absolute filesystem path to reveal in Finder (primary file).
 	Path string `json:"path,omitempty"`
+	// Engagement is filled when Instagram media-info was parsed during download.
+	Engagement *EngagementCounts `json:"engagement,omitempty"`
 }
 
 // Downloader runs gallery-dl (which uses yt-dlp + ffmpeg for Instagram videos) and stores
@@ -260,7 +272,7 @@ func (d *Downloader) Download(ctx context.Context, dir string, id uint64, url st
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
-	args := []string{"--directory", tmp, "--filename", "{num}.{extension}"}
+	args := []string{"--directory", tmp, "--filename", "{num}.{extension}", "--write-pages"}
 	if d.cookiesBrowser != "" {
 		args = append(args, "--cookies-from-browser", d.cookiesBrowser+"/.instagram.com")
 	}
@@ -275,12 +287,16 @@ func (d *Downloader) Download(ctx context.Context, dir string, id uint64, url st
 	}
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = tmp // --write-pages lands in cwd; keep dumps next to media then strip them
 	cmd.Env = append(os.Environ(), "PATH="+pathWithManagedBin())
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, ErrDownloadTimeout
 	}
+
+	engagement := parseEngagementFromPages(tmp)
+	removeGalleryDLPages(tmp)
 
 	files := listFiles(tmp)
 	if len(files) == 0 {
@@ -293,16 +309,95 @@ func (d *Downloader) Download(ctx context.Context, dir string, id uint64, url st
 	_ = os.Remove(videoPath)
 	_ = os.RemoveAll(postDir)
 
+	state := &DownloadState{Engagement: engagement}
 	if len(files) == 1 && strings.EqualFold(filepath.Ext(files[0]), ".mp4") {
 		if err := os.Rename(filepath.Join(tmp, files[0]), videoPath); err != nil {
 			return nil, fmt.Errorf("move video: %w", err)
 		}
-		return &DownloadState{Kind: DownloadKindVideo, Files: 1}, nil
+		state.Kind = DownloadKindVideo
+		state.Files = 1
+		return state, nil
 	}
 	if err := os.Rename(tmp, postDir); err != nil {
 		return nil, fmt.Errorf("move post files: %w", err)
 	}
-	return &DownloadState{Kind: DownloadKindPost, Files: len(files)}, nil
+	state.Kind = DownloadKindPost
+	state.Files = len(files)
+	return state, nil
+}
+
+// parseEngagementFromPages reads gallery-dl --write-pages dumps for Instagram media-info counts.
+func parseEngagementFromPages(dir string) *EngagementCounts {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		if !strings.Contains(e.Name(), "_api_v1_media_") && !strings.Contains(e.Name(), "_info_") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if eng := engagementFromMediaInfoJSON(raw); eng != nil {
+			return eng
+		}
+	}
+	return nil
+}
+
+func engagementFromMediaInfoJSON(raw []byte) *EngagementCounts {
+	var payload struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || len(payload.Items) == 0 {
+		return nil
+	}
+	var item struct {
+		LikeCount         *int64 `json:"like_count"`
+		CommentCount      *int64 `json:"comment_count"`
+		MediaRepostCount  *int64 `json:"media_repost_count"`
+		ReshareCount      *int64 `json:"reshare_count"`
+		PlayCount         *int64 `json:"play_count"`
+		IGPlayCount       *int64 `json:"ig_play_count"`
+	}
+	if err := json.Unmarshal(payload.Items[0], &item); err != nil {
+		return nil
+	}
+	play := item.PlayCount
+	if play == nil {
+		play = item.IGPlayCount
+	}
+	if item.LikeCount == nil && item.CommentCount == nil && item.MediaRepostCount == nil && item.ReshareCount == nil && play == nil {
+		return nil
+	}
+	return &EngagementCounts{
+		LikeCount:    item.LikeCount,
+		CommentCount: item.CommentCount,
+		RepostCount:  item.MediaRepostCount,
+		ShareCount:   item.ReshareCount,
+		PlayCount:    play,
+	}
+}
+
+// removeGalleryDLPages deletes --write-pages dumps so they are not treated as media files.
+func removeGalleryDLPages(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		if strings.Contains(e.Name(), "_api_v1_media_") || strings.Contains(e.Name(), "www.instagram.com") {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 // removeStaleTempDirs deletes .tmp-* folders left behind by downloads interrupted by a crash or restart.

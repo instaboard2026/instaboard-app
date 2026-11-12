@@ -20,7 +20,8 @@ var (
 	ErrSaveOrder = errors.New("save order must list each item in this board exactly once")
 )
 
-const saveColumns = `id, url, source, added_from, folder_id, position, created_at, deleted_at`
+const saveColumns = `id, url, source, added_from, folder_id, position, created_at, deleted_at,
+	like_count, comment_count, repost_count, share_count, play_count`
 
 // SaveRepo handles database access for tbl_saves.
 type SaveRepo struct {
@@ -40,7 +41,11 @@ func scanSave(row rowScanner) (models.Save, error) {
 	var s models.Save
 	var folderID sql.NullInt64
 	var deletedAt sql.NullTime
-	if err := row.Scan(&s.ID, &s.URL, &s.Source, &s.AddedFrom, &folderID, &s.Position, &s.CreatedAt, &deletedAt); err != nil {
+	var likeCount, commentCount, repostCount, shareCount, playCount sql.NullInt64
+	if err := row.Scan(
+		&s.ID, &s.URL, &s.Source, &s.AddedFrom, &folderID, &s.Position, &s.CreatedAt, &deletedAt,
+		&likeCount, &commentCount, &repostCount, &shareCount, &playCount,
+	); err != nil {
 		return s, err
 	}
 	if folderID.Valid {
@@ -50,7 +55,20 @@ func scanSave(row rowScanner) (models.Save, error) {
 		t := deletedAt.Time
 		s.DeletedAt = &t
 	}
+	s.LikeCount = nullInt64Ptr(likeCount)
+	s.CommentCount = nullInt64Ptr(commentCount)
+	s.RepostCount = nullInt64Ptr(repostCount)
+	s.ShareCount = nullInt64Ptr(shareCount)
+	s.PlayCount = nullInt64Ptr(playCount)
 	return s, nil
+}
+
+func nullInt64Ptr(n sql.NullInt64) *int64 {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Int64
+	return &v
 }
 
 func (r *SaveRepo) list(ctx context.Context, where string, args ...any) ([]models.Save, error) {
@@ -332,6 +350,30 @@ func (r *SaveRepo) frontPosition(ctx context.Context, userID int64, folderID *in
 		return 1, nil
 	}
 	return int(min.Int64) - 1, nil
+}
+
+// UpdateEngagement stores Instagram engagement counts captured at download time.
+func (r *SaveRepo) UpdateEngagement(ctx context.Context, userID int64, saveID uint64, likes, comments, reposts, shares, plays *int64) (*models.Save, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE tbl_saves SET like_count = ?, comment_count = ?, repost_count = ?, share_count = ?, play_count = ?
+		 WHERE id = ? AND user_id = ?`,
+		nullableInt64(likes), nullableInt64(comments), nullableInt64(reposts), nullableInt64(shares), nullableInt64(plays),
+		saveID, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrSaveNotFound
+	}
+	return r.Get(ctx, userID, saveID)
+}
+
+func nullableInt64(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // Delete permanently removes one of the user's saves (row only; caller removes files).

@@ -62,6 +62,17 @@
           <span class="flex-1">Calendar</span>
         </a>
 
+        <a
+          (click)="onNavLinkClick()"
+          routerLink="/split"
+          routerLinkActive="!bg-nav-active !text-white"
+          data-drop-split="nav"
+          class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
+          [class.drop-target-active]="cardDrag.isSplitHovered()">
+          <span class="material-icons-outlined !text-xl shrink-0">content_cut</span>
+          <span class="flex-1">Split video</span>
+        </a>
+
         @if (isLoggedIn()) {
           <div class="flex items-center justify-between px-2 pt-5 pb-1">
             <span class="text-xs font-medium text-nav-muted">Folders</span>
@@ -234,6 +245,17 @@
         aria-label="Calendar"
         class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover">
         <span class="material-icons-outlined !text-xl">calendar_month</span>
+      </a>
+
+      <a
+        routerLink="/split"
+        routerLinkActive="!bg-nav-active !text-white"
+        data-drop-split="nav"
+        [appTooltip]="'Split video'"
+        aria-label="Split video"
+        class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
+        [class.drop-target-active]="cardDrag.isSplitHovered()">
+        <span class="material-icons-outlined !text-xl">content_cut</span>
       </a>
 
       @if (isLoggedIn()) {

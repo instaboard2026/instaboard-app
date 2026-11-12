@@ -194,6 +194,31 @@
   @if (addError() && folderId() !== null) {
     <p class="mb-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ addError() }}</p>
   }
+  @if (isLoggedIn() && !loading() && !loadError() && saves().length > 0) {
+    <div
+      class="mb-4 flex items-center justify-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5 w-fit mx-auto"
+      role="group"
+      aria-label="Filter by media type">
+      @for (f of mediaFilters; track f.id) {
+        <button
+          type="button"
+          (click)="setMediaFilter(f.id)"
+          [attr.aria-pressed]="mediaFilter() === f.id"
+          [attr.aria-label]="f.label"
+          [title]="f.label + ' · ' + mediaFilterCounts()[f.id]"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors"
+          [class.bg-white]="mediaFilter() === f.id"
+          [class.dark:bg-slate-700]="mediaFilter() === f.id"
+          [class.shadow-sm]="mediaFilter() === f.id"
+          [class.text-ink]="mediaFilter() === f.id"
+          [class.dark:text-white]="mediaFilter() === f.id"
+          [class.text-ink-secondary]="mediaFilter() !== f.id"
+          [class.dark:text-slate-400]="mediaFilter() !== f.id">
+          <span class="material-icons-outlined !text-[20px]">{{ f.icon }}</span>
+        </button>
+      }
+    </div>
+  }
   @if (!isLoggedIn()) {
     @if (sessionStatus() === 'error') {
       <div class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-6 text-center" role="alert">
@@ -232,17 +257,23 @@
         }
       }
     </div>
+  } @else if (visibleSaves().length === 0) {
+    <div class="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center">
+      <span class="material-icons-outlined !text-4xl text-slate-400">filter_alt_off</span>
+      <p class="mt-2 font-semibold">Nothing matches this filter</p>
+      <p class="text-sm text-slate-500 dark:text-slate-400">Try All, or download posts so their media type is known.</p>
+    </div>
   } @else {
     <div
       cdkDropList
       cdkDropListOrientation="mixed"
-      [cdkDropListSortingDisabled]="isBin()"
-      [cdkDropListData]="saves()"
+      [cdkDropListSortingDisabled]="isBin() || mediaFilter() !== 'all'"
+      [cdkDropListData]="visibleSaves()"
       (cdkDropListDropped)="onCardDropped($event)"
       class="grid gap-4"
       [class]="gridClass()"
       [style.--per-row]="perRow()">
-      @for (save of saves(); track save.id) {
+      @for (save of visibleSaves(); track save.id) {
         <div
           cdkDrag
           [cdkDragData]="save"
@@ -275,7 +306,12 @@
       [class.dark:ring-offset-primary-bg]="calendarSchedule.bySave().has(save.id)">
     @if (save.download?.media?.length) {
       <!-- Instagram reel shape (9:16). Carousels swipe sideways. -->
-      <app-media-carousel [media]="save.download.media" />
+      <app-media-carousel
+        [media]="save.download.media"
+        [likeCount]="save.like_count"
+        [commentCount]="save.comment_count"
+        [repostCount]="save.repost_count"
+        (durationSec)="setReelDuration(save.id, $event)" />
     } @else {
       <!-- Same 9:16 frame, nothing to preview yet: download from here. -->
       <div class="relative flex w-full aspect-[9/16] flex-col items-center justify-center gap-3 overflow-hidden bg-[#f5f6f7] dark:bg-slate-800/60 p-3 text-center">
@@ -304,13 +340,16 @@
       </div>
     }
     </div>
-    <div class="px-0.5">
+    <div class="flex items-center justify-between gap-2 px-0.5">
       <button
         type="button"
         (click)="openDetails(save); $event.stopPropagation()"
         class="text-xs font-medium text-ink-secondary dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline">
         Show details
       </button>
+      @if (reelDurationLabel(save.id); as dur) {
+        <span class="shrink-0 text-[11px] tabular-nums text-ink-secondary dark:text-slate-500" [attr.title]="'Duration ' + dur">{{ dur }}</span>
+      }
     </div>
   </div>
 </ng-template>

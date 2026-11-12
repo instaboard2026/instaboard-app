@@ -17,6 +17,12 @@ export const AppRoutes: Routes = [
     title: 'Instaboard - Calendar'
   },
   {
+    path: 'split',
+    loadComponent: () => import('./app/features/adaptive/pages/split-page/split-page.component')
+      .then(c => c.SplitPageComponent),
+    title: 'Instaboard - Split video'
+  },
+  {
     path: 'folders/:id',
     loadComponent: () => import('./app/features/adaptive/pages/dump-page/dump-page.component')
       .then(c => c.DumpPageComponent),

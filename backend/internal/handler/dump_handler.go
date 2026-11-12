@@ -285,6 +285,15 @@ func (h *DumpHandler) Download(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, status, err.Error(), nil)
 		return
 	}
+	if eng := state.Engagement; eng != nil {
+		if updated, err := h.repo.UpdateEngagement(r.Context(), userID, save.ID,
+			eng.LikeCount, eng.CommentCount, eng.RepostCount, eng.ShareCount, eng.PlayCount,
+		); err != nil {
+			slog.Warn("save engagement failed", "user_id", userID, "save_id", id, "err", err)
+		} else {
+			save = updated
+		}
+	}
 	utils.WriteSuccess(w, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
 }
 

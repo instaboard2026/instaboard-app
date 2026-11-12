@@ -1,0 +1,334 @@
+<div
+  class="relative w-full max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 text-ink dark:text-slate-100"
+  data-drop-split="page"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave()"
+  (drop)="onFileDrop($event)"
+  [class.ring-2]="dropping() || isSplitDropHover()"
+  [class.ring-blue-500]="dropping() || isSplitDropHover()"
+  [class.ring-inset]="dropping() || isSplitDropHover()">
+
+  <!-- Folder-style header: icon + title + count, per-row, primary action -->
+  <div class="mb-5 flex items-center justify-between gap-4">
+    <div class="flex items-baseline gap-3">
+      <h1 class="flex min-w-0 items-center gap-2 text-xl font-semibold">
+        <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">content_cut</span>
+        <span class="truncate">Split video</span>
+      </h1>
+      @if (isLoggedIn()) {
+        <span class="shrink-0 text-sm text-ink-secondary dark:text-slate-400">
+          {{ count() }} {{ count() === 1 ? 'video' : 'videos' }}
+        </span>
+      }
+    </div>
+
+    <div class="flex items-center gap-2">
+      <div class="hidden md:flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5" role="group" aria-label="Cards per row">
+        <span class="px-2 text-xs text-ink-secondary dark:text-slate-400">Per row</span>
+        @for (n of perRowOptions; track n) {
+          <button
+            type="button"
+            (click)="setPerRow(n)"
+            [attr.aria-pressed]="perRow() === n"
+            class="h-7 min-w-[32px] px-2 rounded-[10px] text-sm font-medium transition-colors"
+            [class.bg-white]="perRow() === n"
+            [class.dark:bg-slate-700]="perRow() === n"
+            [class.shadow-sm]="perRow() === n"
+            [class.text-ink]="perRow() === n"
+            [class.dark:text-white]="perRow() === n"
+            [class.text-ink-secondary]="perRow() !== n"
+            [class.dark:text-slate-400]="perRow() !== n">
+            {{ n }}
+          </button>
+        }
+      </div>
+
+      @if (isLoggedIn()) {
+        <label
+          class="h-8 shrink-0 px-3 inline-flex cursor-pointer items-center gap-1 rounded-[10px] bg-[#303030] hover:bg-[#1a1a1a] text-white text-sm font-semibold whitespace-nowrap shadow-[inset_0_-1px_0_#000,inset_0_1px_0_rgba(255,255,255,0.18)] transition-colors dark:bg-white dark:text-ink dark:hover:bg-slate-200">
+          <span class="material-icons-outlined !text-lg">upload_file</span>
+          Upload video
+          <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm" class="hidden" (change)="onFilePicked($event)" />
+        </label>
+      }
+    </div>
+  </div>
+
+  @if (notice(); as msg) {
+    <p class="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" role="status">{{ msg }}</p>
+  }
+
+  @if (!isLoggedIn()) {
+    <p class="py-10 text-center text-sm text-ink-secondary dark:text-slate-400">Sign in to use Split video.</p>
+  } @else if (loading() && projects().length === 0) {
+    <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+      @for (i of [1, 2, 3, 4, 5, 6]; track i) {
+        <div class="w-full aspect-[9/16] rounded-2xl bg-[#f1f1f1] dark:bg-slate-800 animate-pulse"></div>
+      }
+    </div>
+  } @else if (projects().length === 0) {
+    <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
+      <span class="material-icons-outlined !text-4xl text-ink-secondary dark:text-slate-500">content_cut</span>
+      <p class="mt-3 text-sm font-medium">Drop a dump video or a local file</p>
+      <p class="mt-1 max-w-sm text-xs text-ink-secondary dark:text-slate-400">
+        Drag a card from Home onto this page or the Split video sidebar item, or upload a file.
+      </p>
+    </div>
+  } @else {
+    <div class="flex flex-col gap-6">
+      <!-- Saved cut windows: stroke frame, master first, then clips -->
+      @for (board of boardList(); track board.id) {
+        <section
+          class="rounded-2xl border border-[#ebebeb] bg-white p-3 shadow-card dark:border-slate-800 dark:bg-card-bg dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+          [attr.aria-label]="'Split board ' + (board.title || board.id)">
+          <div class="mb-3 flex items-center gap-2 px-0.5">
+            <button
+              type="button"
+              (click)="openCut(board)"
+              [disabled]="busyId() === board.id || cutting()"
+              [attr.aria-label]="'Cut'"
+              title="Cut"
+              class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary hover:bg-[#f1f1f1] hover:text-ink dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">content_cut</span>
+            </button>
+            <button
+              type="button"
+              (click)="openDetails(board)"
+              class="text-xs font-medium text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white hover:underline">
+              Show details
+            </button>
+            <span class="text-[11px] text-ink-secondary dark:text-slate-500">{{ board.clips?.length ?? 0 }} clips</span>
+            <button
+              type="button"
+              (click)="deleteProject(board, $event)"
+              [disabled]="busyId() === board.id"
+              aria-label="Remove from Split"
+              title="Remove"
+              class="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary hover:bg-[#f1f1f1] hover:text-red-600 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-red-400 disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">close</span>
+            </button>
+          </div>
+
+          <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+            <div class="min-w-0 flex flex-col gap-1.5">
+              <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card ring-2 ring-purple-500 ring-offset-2 ring-offset-white dark:ring-offset-card-bg dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                <video
+                  appAutoplayVideo
+                  [src]="board.master_url"
+                  loop
+                  playsinline
+                  controls
+                  preload="metadata"
+                  class="h-full w-full select-none object-contain"></video>
+              </div>
+              <div class="px-0.5">
+                <p class="text-xs font-semibold">Master</p>
+                <p class="text-[11px] tabular-nums text-ink-secondary dark:text-slate-400">
+                  {{ formatRange(0, board.duration_ms ?? 0) }}
+                </p>
+              </div>
+            </div>
+
+            @for (clip of board.clips ?? []; track clip.id) {
+              <div class="min-w-0 flex flex-col gap-1.5">
+                <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                  <video
+                    appAutoplayVideo
+                    [src]="clip.url"
+                    loop
+                    playsinline
+                    controls
+                    preload="metadata"
+                    class="h-full w-full select-none object-contain"></video>
+                </div>
+                <div class="px-0.5">
+                  <p class="text-xs font-semibold">Clip {{ clip.position }}</p>
+                  <p class="text-[11px] tabular-nums text-ink-secondary dark:text-slate-400">
+                    {{ formatRange(clip.start_ms, clip.end_ms) }}
+                  </p>
+                </div>
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Not-yet-saved / uncut projects -->
+      @if (pendingProjects().length) {
+        <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+          @for (project of pendingProjects(); track project.id) {
+            <div class="min-w-0 flex flex-col gap-2">
+              <div class="overflow-hidden rounded-2xl shadow-card dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                <div class="relative w-full aspect-[9/16] overflow-hidden rounded-2xl bg-black">
+                  <video
+                    appAutoplayVideo
+                    [src]="project.master_url"
+                    loop
+                    playsinline
+                    controls
+                    preload="metadata"
+                    class="h-full w-full select-none object-contain"></video>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 px-0.5">
+                <button
+                  type="button"
+                  (click)="openCut(project)"
+                  [disabled]="busyId() === project.id || cutting()"
+                  [attr.aria-label]="'Cut'"
+                  title="Cut"
+                  class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary hover:bg-[#f1f1f1] hover:text-ink dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white disabled:opacity-50">
+                  <span class="material-icons-outlined !text-lg">content_cut</span>
+                </button>
+                <button
+                  type="button"
+                  (click)="openDetails(project)"
+                  class="text-xs font-medium text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white hover:underline">
+                  Show details
+                </button>
+                <button
+                  type="button"
+                  (click)="deleteProject(project, $event)"
+                  [disabled]="busyId() === project.id"
+                  aria-label="Remove from Split"
+                  title="Remove"
+                  class="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-lg text-ink-secondary hover:bg-[#f1f1f1] hover:text-red-600 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-red-400 disabled:opacity-50">
+                  <span class="material-icons-outlined !text-lg">close</span>
+                </button>
+              </div>
+              @if (project.status === 'error' && project.error_message) {
+                <p class="px-0.5 text-[11px] leading-snug text-red-600 dark:text-red-400">{{ project.error_message }}</p>
+              } @else if (project.clip_count > 0) {
+                <p class="px-0.5 text-[11px] text-ink-secondary dark:text-slate-500">{{ project.clip_count }} clips — open Cut, then Save</p>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+</div>
+
+<!-- Details -->
+@if (detailsProject(); as project) {
+  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[12vh]" role="dialog" aria-modal="true" aria-labelledby="split-details-title">
+    <button type="button" class="absolute inset-0 bg-black/40" aria-label="Close" (click)="closeDetails()"></button>
+    <div class="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900">
+      <div class="flex items-start justify-between gap-3">
+        <h2 id="split-details-title" class="text-lg font-bold">Details</h2>
+        <button type="button" (click)="closeDetails()" aria-label="Close" class="rounded-lg p-1 text-ink-secondary hover:bg-[#f1f1f1] dark:hover:bg-white/5">
+          <span class="material-icons-outlined">close</span>
+        </button>
+      </div>
+      <dl class="mt-4 space-y-3 text-sm">
+        <div>
+          <dt class="text-ink-secondary dark:text-slate-400">Title</dt>
+          <dd class="mt-0.5 break-all font-medium">{{ project.title || 'Untitled' }}</dd>
+        </div>
+        <div>
+          <dt class="text-ink-secondary dark:text-slate-400">Source</dt>
+          <dd class="mt-0.5 font-medium">{{ project.source_type === 'save' ? 'Dump card' : 'Upload' }}</dd>
+        </div>
+        @if (detailsSave(project); as save) {
+          <div>
+            <dt class="text-ink-secondary dark:text-slate-400">Original link</dt>
+            <dd class="mt-0.5 break-all">
+              <a [href]="save.url" target="_blank" rel="noopener" class="text-blue-600 hover:underline dark:text-blue-400">{{ save.url }}</a>
+            </dd>
+          </div>
+        }
+        <div>
+          <dt class="text-ink-secondary dark:text-slate-400">Duration</dt>
+          <dd class="mt-0.5 font-medium tabular-nums">{{ formatMs(project.duration_ms) }}</dd>
+        </div>
+        <div>
+          <dt class="text-ink-secondary dark:text-slate-400">Status</dt>
+          <dd class="mt-0.5 font-medium capitalize">{{ project.status }}</dd>
+        </div>
+      </dl>
+      @if (project.source_save_id) {
+        <a routerLink="/home" class="mt-4 inline-flex text-sm font-medium text-blue-600 hover:underline dark:text-blue-400">Open Home</a>
+      }
+    </div>
+  </div>
+}
+
+<!-- Cut results window -->
+@if (resultsProject(); as project) {
+  <div class="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[6vh]" role="dialog" aria-modal="true" aria-labelledby="split-results-title">
+    <button type="button" class="absolute inset-0 bg-black/50" aria-label="Close" (click)="closeResults()"></button>
+    <div class="relative z-10 flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#ebebeb] bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[#ebebeb] px-4 py-3 dark:border-slate-800">
+        <div class="min-w-0">
+          <h2 id="split-results-title" class="truncate text-lg font-bold">Cuts</h2>
+          <p class="truncate text-xs text-ink-secondary dark:text-slate-400">{{ project.title || 'Master first, then each clip' }}</p>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            (click)="runCut(project.id)"
+            [disabled]="cutting() || saving()"
+            class="inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-sm font-semibold text-ink dark:text-slate-100 ring-1 ring-[#e3e3e3] dark:ring-slate-600 hover:bg-[#fafafa] dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+            <span class="material-icons-outlined !text-base" [class.animate-spin]="cutting()">{{ cutting() ? 'progress_activity' : 'content_cut' }}</span>
+            {{ cutting() ? 'Cutting…' : 'Re-cut' }}
+          </button>
+          <button
+            type="button"
+            (click)="saveResults()"
+            [disabled]="cutting() || saving() || !(project.clips?.length)"
+            class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] bg-[#303030] hover:bg-[#1a1a1a] text-white text-sm font-semibold whitespace-nowrap shadow-[inset_0_-1px_0_#000,inset_0_1px_0_rgba(255,255,255,0.18)] transition-colors dark:bg-white dark:text-ink dark:hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40">
+            <span class="material-icons-outlined !text-lg">save</span>
+            Save
+          </button>
+          <button type="button" (click)="closeResults()" aria-label="Close" class="rounded-lg p-1 text-ink-secondary hover:bg-[#f1f1f1] dark:hover:bg-white/5">
+            <span class="material-icons-outlined">close</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+        @if (cutting() && !(project.clips?.length)) {
+          <p class="py-16 text-center text-sm text-ink-secondary dark:text-slate-400">Detecting cuts…</p>
+        } @else {
+          <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+            <div class="min-w-0 flex flex-col gap-2">
+              <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card ring-2 ring-purple-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                <video
+                  [src]="project.master_url"
+                  controls
+                  playsinline
+                  preload="metadata"
+                  class="h-full w-full object-contain"></video>
+              </div>
+              <div class="px-0.5">
+                <p class="text-xs font-semibold">Master</p>
+                <p class="text-[11px] tabular-nums text-ink-secondary dark:text-slate-400">
+                  {{ formatRange(0, project.duration_ms ?? 0) }}
+                </p>
+              </div>
+            </div>
+
+            @for (clip of project.clips ?? []; track clip.id) {
+              <div class="min-w-0 flex flex-col gap-2">
+                <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                  <video
+                    [src]="clip.url"
+                    controls
+                    playsinline
+                    preload="metadata"
+                    class="h-full w-full object-contain"></video>
+                </div>
+                <div class="px-0.5">
+                  <p class="text-xs font-semibold">Clip {{ clip.position }}</p>
+                  <p class="text-[11px] tabular-nums text-ink-secondary dark:text-slate-400">
+                    {{ formatRange(clip.start_ms, clip.end_ms) }}
+                  </p>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+}

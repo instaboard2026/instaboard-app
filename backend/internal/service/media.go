@@ -70,3 +70,31 @@ func MediaType(file string) string {
 		return "image"
 	}
 }
+
+func (m *MediaSigner) splitSignature(userID int64, projectID uint64, file string, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/split/%d/%d/%s/%d", userID, projectID, file, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// SplitURL returns a signed URL for a file under a split project (master.mp4 or clips/N.mp4).
+func (m *MediaSigner) SplitURL(userID int64, projectID uint64, file string) MediaItem {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.splitSignature(userID, projectID, file, exp))
+	escaped := strings.ReplaceAll(url.PathEscape(file), "%2F", "/")
+	return MediaItem{
+		URL:  fmt.Sprintf("%s/media/split/%d/%d/%s?%s", m.baseURL, userID, projectID, escaped, q.Encode()),
+		Type: MediaType(file),
+	}
+}
+
+// VerifySplit checks a split media URL's signature and expiry.
+func (m *MediaSigner) VerifySplit(userID int64, projectID uint64, file, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.splitSignature(userID, projectID, file, exp)))
+}

@@ -81,6 +81,9 @@ func main() {
 	dumpHandler := handler.NewDumpHandler(saveRepo, settingsRepo, downloader, mediaSigner, cfg.DownloadDir, cfg.CookiesFromBrowser)
 	folderHandler := handler.NewFolderHandler(repository.NewFolderRepo(db), saveRepo, dumpHandler)
 	calendarHandler := handler.NewCalendarHandler(repository.NewCalendarRepo(db))
+	splitRepo := repository.NewSplitRepo(db)
+	splitService := service.NewSplitService(downloader)
+	splitHandler := handler.NewSplitHandler(splitRepo, saveRepo, settingsRepo, splitService, downloader, mediaSigner, cfg.DownloadDir)
 
 	var srv *http.Server
 	var restartAfter atomic.Bool
@@ -101,6 +104,7 @@ func main() {
 	})
 
 	r.Get("/media/{uid}/{id}/{file}", dumpHandler.Media)
+	r.Get("/media/split/{uid}/{projectId}/*", splitHandler.Media)
 	r.With(httprate.LimitByIP(60, time.Minute)).Post("/auth/local", authHandler.Local)
 
 	r.Route("/api", func(r chi.Router) {
@@ -111,6 +115,11 @@ func main() {
 			r.Put("/calendar/saves/{id}", calendarHandler.Schedule)
 			r.Delete("/calendar/saves/{id}", calendarHandler.Unschedule)
 			r.Put("/calendar/notes/{date}", calendarHandler.SetNote)
+			r.Get("/split/projects", splitHandler.List)
+			r.Post("/split/projects", splitHandler.Create)
+			r.Get("/split/projects/{id}", splitHandler.Get)
+			r.Post("/split/projects/{id}/cut", splitHandler.Cut)
+			r.Delete("/split/projects/{id}", splitHandler.Delete)
 			r.Get("/dump", dumpHandler.GetDump)
 			r.Get("/stats", dumpHandler.Stats)
 			r.Post("/dump", dumpHandler.AddToDump)

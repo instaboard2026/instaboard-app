@@ -68,7 +68,7 @@
       type="button"
       (click)="playback.toggleAutoplay()"
       [attr.aria-pressed]="playback.autoplay()"
-      [title]="playback.autoplay() ? 'Videos play automatically (muted). Click to turn off.' : 'Videos are paused. Click to autoplay them.'"
+      [title]="playback.autoplay() ? 'Videos play automatically. Click to turn off.' : 'Videos are paused. Click to autoplay them.'"
       class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors">
       <span class="material-icons-outlined !text-base">{{ playback.autoplay() ? 'play_circle' : 'pause_circle' }}</span>
       Autoplay {{ playback.autoplay() ? 'on' : 'off' }}

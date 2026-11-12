@@ -3,8 +3,11 @@ import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { CalendarScheduleService } from '../../services/calendar-schedule.service';
-import { CardDragService, isCalendarDrop } from '../../services/card-drag.service';
+import { CardDragService, isCalendarDrop, isSplitDrop } from '../../services/card-drag.service';
 import { DumpService, Save, SaveMedia } from '../../services/dump.service';
+import { FoldersService } from '../../services/folders.service';
+import { SplitService } from '../../services/split.service';
+import { Router } from '@angular/router';
 
 interface CalendarCell {
   key: string;
@@ -232,6 +235,9 @@ export class CalendarPageComponent {
   readonly schedule = inject(CalendarScheduleService);
   readonly cardDrag = inject(CardDragService);
   private dumpService = inject(DumpService);
+  private splitService = inject(SplitService);
+  private foldersService = inject(FoldersService);
+  private router = inject(Router);
 
   private readonly cursor = signal(startOfMonth(new Date()));
   readonly selectedKey = signal<string | null>(null);
@@ -307,15 +313,29 @@ export class CalendarPageComponent {
 
   onReelDragMoved(event: CdkDragMove<Save>): void {
     const target = this.cardDrag.targetAt(event.pointerPosition.x, event.pointerPosition.y);
-    this.cardDrag.hoverTarget.set(isCalendarDrop(target) ? target : null);
+    if (isCalendarDrop(target) || isSplitDrop(target)) {
+      this.cardDrag.hoverTarget.set(target);
+    } else {
+      this.cardDrag.hoverTarget.set(null);
+    }
   }
 
-  /** Dropping on a different day moves the reel. Same day, or anywhere else, leaves it. */
+  /** Dropping on a different day moves the reel. Split copies into analysis. Else leave it. */
   onReelDragEnded(save: Save, event: CdkDragEnd<Save>): void {
     const target =
       this.cardDrag.targetAt(event.dropPoint.x, event.dropPoint.y) ?? this.cardDrag.hoverTarget();
     this.cardDrag.dragging.set(null);
     this.cardDrag.hoverTarget.set(null);
+    if (isSplitDrop(target)) {
+      this.splitService.createFromSave(save.id).subscribe({
+        next: () => {
+          this.foldersService.showNotice('Added to Split video');
+          void this.router.navigateByUrl('/split');
+        },
+        error: (err: Error) => this.foldersService.showNotice(err.message),
+      });
+      return;
+    }
     if (!isCalendarDrop(target) || target.date === this.schedule.dateFor(save.id)) return;
     this.schedule.schedule(save.id, target.date);
   }
