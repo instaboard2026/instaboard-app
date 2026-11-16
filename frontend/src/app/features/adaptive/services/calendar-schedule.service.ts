@@ -4,6 +4,8 @@ import { Observable, catchError, forkJoin, map, of, throwError } from 'rxjs';
 import { environment } from 'environments';
 import { AuthTokenService } from './auth-token.service';
 import { CacheService } from './cache.service';
+import { DumpService } from './dump.service';
+import { Folder, FoldersService } from './folders.service';
 import { UserContextService } from './user-context.service';
 
 const SCHEDULE_KEY = 'calendar_schedule_v1';
@@ -33,6 +35,8 @@ export class CalendarScheduleService {
   private authToken = inject(AuthTokenService);
   private cache = inject(CacheService);
   private userContext = inject(UserContextService);
+  private dump = inject(DumpService);
+  private folders = inject(FoldersService);
 
   /** saveId → YYYY-MM-DD. Read from templates for OnPush reactivity. */
   readonly bySave = signal<ReadonlyMap<number, string>>(new Map());
@@ -54,6 +58,17 @@ export class CalendarScheduleService {
         return;
       }
       untracked(() => this.load());
+    });
+
+    // Calendar tiles join schedule → DumpService.byId(). Home alone is not enough when
+    // scheduled reels live in folders; load those boards (and Bin) until every id resolves.
+    effect(() => {
+      if (!this.userContext.isLoggedIn()) return;
+      const scheduled = this.bySave();
+      const byId = this.dump.byId();
+      const folderList = this.folders.folders();
+      const foldersReady = this.folders.loaded();
+      untracked(() => this.hydrateMissingSaves(scheduled, byId, folderList, foldersReady));
     });
   }
 
@@ -295,6 +310,43 @@ export class CalendarScheduleService {
     this.noteSaved.clear();
     this.bySave.set(new Map());
     this.notes.set(new Map());
+  }
+
+  /** Fetches any board that might hold a scheduled save the calendar cannot render yet. */
+  private hydrateMissingSaves(
+    scheduled: ReadonlyMap<number, string>,
+    byId: ReadonlyMap<number, unknown>,
+    folderList: Folder[],
+    foldersReady: boolean
+  ): void {
+    let missing = false;
+    for (const id of scheduled.keys()) {
+      if (!byId.has(id)) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) return;
+
+    if (!foldersReady) {
+      this.folders.load();
+      return;
+    }
+
+    const reqs: Observable<unknown>[] = [];
+    if (!this.dump.isLoaded('dump') && !this.dump.isLoading('dump')) {
+      reqs.push(this.dump.load('dump'));
+    }
+    for (const folder of folderList) {
+      if (!this.dump.isLoaded(folder.id) && !this.dump.isLoading(folder.id)) {
+        reqs.push(this.dump.load(folder.id));
+      }
+    }
+    if (!this.dump.isLoaded('bin') && !this.dump.isLoading('bin')) {
+      reqs.push(this.dump.load('bin'));
+    }
+    if (!reqs.length) return;
+    forkJoin(reqs).subscribe({ error: () => {} });
   }
 
   private authHeaders(): HttpHeaders | null {
