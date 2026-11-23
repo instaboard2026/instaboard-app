@@ -6,6 +6,7 @@ import { DownloadSettingsService } from '../../../services/download-settings.ser
 import { UpdateService } from '../../../services/update.service';
 import { AppLifecycleService } from '../../../services/app-lifecycle.service';
 import { UserContextService } from '../../../services/user-context.service';
+import { MediaMemoryCacheService } from '../../../services/media-memory-cache.service';
 import { DownloadSettingsModalComponent } from '../download-settings-modal/download-settings-modal.component';
 import { ToolsSettingsModalComponent } from '../tools-settings-modal/tools-settings-modal.component';
 import { UpdateSettingsModalComponent } from '../update-settings-modal/update-settings-modal.component';
@@ -29,10 +30,15 @@ export class FooterComponent {
   readonly downloads = inject(DownloadSettingsService);
   readonly updates = inject(UpdateService);
   readonly lifecycle = inject(AppLifecycleService);
+  readonly mediaCache = inject(MediaMemoryCacheService);
   readonly isLoggedIn = inject(UserContextService).isLoggedIn;
   readonly downloadsOpen = signal(false);
   readonly toolsOpen = signal(false);
   readonly updateOpen = signal(false);
+
+  clearMediaCache(): void {
+    this.mediaCache.clear();
+  }
 
   constructor() {
     effect(() => (this.isLoggedIn() ? this.downloads.load() : this.downloads.clear()));

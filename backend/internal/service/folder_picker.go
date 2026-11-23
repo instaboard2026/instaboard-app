@@ -47,8 +47,32 @@ func PickerAvailable() bool {
 }
 
 // ChooseFolder opens the native macOS folder picker on the computer running the backend and returns
-// the chosen absolute path. startDir is preselected when it exists.
+// the chosen absolute path. startDir is preselected when it exists. Requires the folder to be writable.
 func ChooseFolder(ctx context.Context, prompt, startDir string) (string, error) {
+	path, err := chooseFolderPath(ctx, prompt, startDir)
+	if err != nil {
+		return "", err
+	}
+	if err := CheckWritableDir(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ChooseReadableFolder opens the native picker and only requires an existing directory (e.g. SD cards).
+func ChooseReadableFolder(ctx context.Context, prompt, startDir string) (string, error) {
+	path, err := chooseFolderPath(ctx, prompt, startDir)
+	if err != nil {
+		return "", err
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.IsDir() || !filepath.IsAbs(path) {
+		return "", ErrFolderNotWritable
+	}
+	return path, nil
+}
+
+func chooseFolderPath(ctx context.Context, prompt, startDir string) (string, error) {
 	if !PickerAvailable() {
 		return "", ErrPickerUnsupported
 	}
@@ -71,11 +95,7 @@ func ChooseFolder(ctx context.Context, prompt, startDir string) (string, error) 
 		}
 		return "", fmt.Errorf("folder picker failed: %s", strings.TrimSpace(string(out)))
 	}
-	path := filepath.Clean(strings.TrimSpace(string(out)))
-	if err := CheckWritableDir(path); err != nil {
-		return "", err
-	}
-	return path, nil
+	return filepath.Clean(strings.TrimSpace(string(out))), nil
 }
 
 // CheckWritableDir verifies path is an existing folder we can create files in.

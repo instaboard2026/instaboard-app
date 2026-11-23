@@ -73,6 +73,28 @@
       <span class="material-icons-outlined !text-base">{{ playback.autoplay() ? 'play_circle' : 'pause_circle' }}</span>
       Autoplay {{ playback.autoplay() ? 'on' : 'off' }}
     </button>
+    <span
+      class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300"
+      [title]="mediaCache.count() + ' media file' + (mediaCache.count() === 1 ? '' : 's') + ' kept in memory for this session'">
+      <span class="material-icons-outlined !text-base">memory</span>
+      Cache {{ mediaCache.label() }}
+      <button
+        type="button"
+        (click)="clearMediaCache()"
+        [disabled]="mediaCache.bytes() === 0"
+        title="Clear session media cache"
+        class="ml-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+        Clear
+      </button>
+    </span>
+    @if (downloads.diskLabel(); as disk) {
+      <span
+        class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-slate-300"
+        [title]="'This Mac · ' + disk">
+        <span class="material-icons-outlined !text-base">hard_drive</span>
+        {{ disk }}
+      </span>
+    }
     <app-theme-toggle></app-theme-toggle>
   </div>
 </footer>

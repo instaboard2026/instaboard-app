@@ -1,0 +1,344 @@
+<div class="relative w-full max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 text-ink dark:text-slate-100">
+  <div class="mb-5 flex flex-col gap-3">
+    <div class="flex min-w-0 items-center gap-3">
+      <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 class="flex min-w-0 items-center gap-2 text-xl font-semibold">
+          <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">photo_camera</span>
+          <span class="truncate">Manage camera</span>
+        </h1>
+        @if (isLoggedIn() && count() > 0) {
+          <span class="shrink-0 text-sm text-ink-secondary dark:text-slate-400">
+            {{ count() }} {{ count() === 1 ? 'file' : 'files' }}
+          </span>
+        }
+        @if (scanning()) {
+          <span class="shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400">
+            Scanning… {{ indexedCount() }}
+          </span>
+        }
+        @if (folderStorageLabel(); as storage) {
+          <span
+            class="min-w-0 max-w-full truncate text-sm text-ink-secondary dark:text-slate-400"
+            [title]="storage">
+            {{ storage }}
+          </span>
+        }
+      </div>
+      <div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+        @if (isLoggedIn()) {
+          @if (total() > 0 || scanning()) {
+            <button
+              type="button"
+              (click)="refresh()"
+              [disabled]="loading() || scanning()"
+              title="Refresh"
+              aria-label="Refresh"
+              class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[#d0d0d0] bg-white text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">refresh</span>
+            </button>
+          }
+          <button
+            type="button"
+            (click)="openFolder()"
+            [disabled]="opening()"
+            class="h-8 shrink-0 px-3 inline-flex cursor-pointer items-center gap-1 rounded-[10px] bg-[#303030] hover:bg-[#1a1a1a] text-white text-sm font-semibold whitespace-nowrap shadow-[inset_0_-1px_0_#000,inset_0_1px_0_rgba(255,255,255,0.18)] transition-colors dark:bg-white dark:text-ink dark:hover:bg-slate-200 disabled:opacity-50">
+            <span class="material-icons-outlined !text-lg">folder_open</span>
+            {{ needsReconnect() ? 'Reconnect card' : (total() > 0 || scanning() ? 'Change folder' : 'Open SD card folder') }}
+          </button>
+        }
+      </div>
+    </div>
+  </div>
+
+  @if (notice(); as msg) {
+    <p class="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200" role="status">{{ msg }}</p>
+  }
+  @if (activeCopy(); as job) {
+    <div class="mb-3 rounded-xl bg-blue-50 px-3 py-2.5 text-sm text-blue-900 dark:bg-blue-500/10 dark:text-blue-200" role="status">
+      <div class="flex items-center justify-between gap-3">
+        <span>
+          Copying {{ job.done }} / {{ job.total }}
+          @if (job.bytes_done > 0) {
+            · {{ formatCopyBytes(job.bytes_done) }}
+          }
+        </span>
+        <span class="shrink-0 tabular-nums">{{ copyPercent() }}%</span>
+      </div>
+      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-200/70 dark:bg-blue-900/50">
+        <div
+          class="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out dark:bg-blue-400"
+          [style.width.%]="copyPercent()"></div>
+      </div>
+    </div>
+  }
+
+  @if (!isLoggedIn()) {
+    <p class="py-10 text-center text-sm text-ink-secondary dark:text-slate-400">Sign in to manage your camera.</p>
+  } @else if (needsReconnect() && total() === 0 && !scanning()) {
+    <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
+      <span class="material-icons-outlined !text-4xl text-ink-secondary dark:text-slate-500">sd_card_alert</span>
+      <p class="mt-3 text-sm font-medium">Card not available</p>
+      <p class="mt-1 max-w-sm text-xs text-ink-secondary dark:text-slate-400">
+        Last used: {{ label() || 'camera folder' }}. Plug it in again, then reconnect.
+      </p>
+      <button type="button" (click)="openFolder()" class="mt-4 h-8 px-3 rounded-[10px] bg-[#303030] text-sm font-semibold text-white dark:bg-white dark:text-ink">
+        Reconnect card
+      </button>
+      <button type="button" (click)="forgetCard()" class="mt-2 text-xs text-ink-secondary underline dark:text-slate-400">Forget saved folder</button>
+    </div>
+  } @else if (loading() && items().length === 0 && !scanning()) {
+    <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+      @for (i of [1, 2, 3, 4, 5, 6]; track i) {
+        <div class="w-full aspect-[9/16] rounded-2xl bg-[#f1f1f1] dark:bg-slate-800 animate-pulse"></div>
+      }
+    </div>
+  } @else if (total() === 0 && !scanning()) {
+    <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
+      <span class="material-icons-outlined !text-4xl text-ink-secondary dark:text-slate-500">photo_camera</span>
+      <p class="mt-3 text-sm font-medium">Open your camera or SD card folder</p>
+      <p class="mt-1 max-w-sm text-xs text-ink-secondary dark:text-slate-400">
+        Browse in pages of {{ pageSize() }} so videos on this page can autoplay without loading the whole card.
+      </p>
+    </div>
+  } @else {
+    @if (truncated() || timedOut()) {
+      <p class="mb-3 text-xs text-ink-secondary dark:text-slate-400">
+        @if (timedOut()) { Scan timed out — showing a partial index. }
+        @if (truncated()) { Hit the file limit — showing the first {{ indexedCount() }}. }
+      </p>
+    }
+
+    @if (noFolders()) {
+      <p class="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+        Create a Local media folder in the sidebar before copying.
+      </p>
+    }
+
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div
+        class="flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5 w-fit"
+        role="group"
+        aria-label="Filter by media type">
+        @for (f of mediaFilters; track f.id) {
+          <button
+            type="button"
+            (click)="setMediaFilter(f.id)"
+            [attr.aria-pressed]="mediaFilter() === f.id"
+            [attr.aria-label]="f.label"
+            [title]="f.label + ' · ' + mediaFilterCounts()[f.id]"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors"
+            [class.bg-white]="mediaFilter() === f.id"
+            [class.dark:bg-slate-700]="mediaFilter() === f.id"
+            [class.shadow-sm]="mediaFilter() === f.id"
+            [class.text-ink]="mediaFilter() === f.id"
+            [class.dark:text-white]="mediaFilter() === f.id"
+            [class.text-ink-secondary]="mediaFilter() !== f.id"
+            [class.dark:text-slate-400]="mediaFilter() !== f.id">
+            <span class="material-icons-outlined !text-[20px]">{{ f.icon }}</span>
+          </button>
+        }
+      </div>
+
+      <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+        <div class="hidden md:flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5" role="group" aria-label="Cards per row">
+          <span class="px-2 text-xs text-ink-secondary dark:text-slate-400">Per row</span>
+          @for (n of perRowOptions; track n) {
+            <button
+              type="button"
+              (click)="setPerRow(n)"
+              [attr.aria-pressed]="perRow() === n"
+              class="h-7 min-w-[32px] px-2 rounded-[10px] text-sm font-medium transition-colors"
+              [class.bg-white]="perRow() === n"
+              [class.dark:bg-slate-700]="perRow() === n"
+              [class.shadow-sm]="perRow() === n"
+              [class.text-ink]="perRow() === n"
+              [class.dark:text-white]="perRow() === n"
+              [class.text-ink-secondary]="perRow() !== n"
+              [class.dark:text-slate-400]="perRow() !== n">
+              {{ n }}
+            </button>
+          }
+        </div>
+        <div class="flex items-center gap-2" role="navigation" aria-label="Camera pages">
+          <button
+            type="button"
+            (click)="goPrev()"
+            [disabled]="!canPrev() || loading()"
+            class="inline-flex h-8 items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white px-2.5 text-sm font-medium disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800">
+            <span class="material-icons-outlined !text-lg">chevron_left</span>
+            Previous
+          </button>
+          <span class="inline-flex items-center gap-2 text-sm text-ink-secondary dark:text-slate-400 whitespace-nowrap">
+            Page {{ displayPage() }} of {{ pageCount() }}
+            <label class="inline-flex items-center gap-1.5">
+              <span class="text-xs">Per page</span>
+              <select
+                [value]="pageSize()"
+                (change)="onPageSizeSelect($event)"
+                [disabled]="loading()"
+                title="Items per page"
+                class="box-border h-8 w-[4.75rem] rounded-[10px] border border-[#d0d0d0] bg-white py-0 pl-2 pr-1 text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 disabled:opacity-40">
+                @for (n of pageSizeOptions; track n) {
+                  <option [value]="n">{{ n }}</option>
+                }
+              </select>
+            </label>
+          </span>
+          <button
+            type="button"
+            (click)="goNext()"
+            [disabled]="!canNext() || loading()"
+            class="inline-flex h-8 items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white px-2.5 text-sm font-medium disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800">
+            Next
+            <span class="material-icons-outlined !text-lg">chevron_right</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-4 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        (click)="toggleSelectMode()"
+        [attr.aria-pressed]="selectMode()"
+        class="inline-flex h-8 items-center gap-1 rounded-[10px] border px-2.5 text-sm font-medium transition-colors"
+        [class.border-blue-500]="selectMode()"
+        [class.bg-blue-50]="selectMode()"
+        [class.text-blue-700]="selectMode()"
+        [class.dark:border-blue-400]="selectMode()"
+        [class.dark:bg-blue-950/40]="selectMode()"
+        [class.dark:text-blue-300]="selectMode()"
+        [class.border-[#d0d0d0]]="!selectMode()"
+        [class.bg-white]="!selectMode()"
+        [class.text-ink]="!selectMode()"
+        [class.dark:border-slate-600]="!selectMode()"
+        [class.dark:bg-slate-800]="!selectMode()"
+        [class.dark:text-slate-200]="!selectMode()">
+        <span class="material-icons-outlined !text-lg">{{ selectMode() ? 'check_circle' : 'select_all' }}</span>
+        {{ selectMode() ? 'Selecting' : 'Select' }}
+      </button>
+      @if (selectMode()) {
+        <span class="text-sm text-ink-secondary dark:text-slate-400">
+          {{ selectedCount() }} selected
+          @if (selectedBytesLabel(); as size) {
+            · {{ size }}
+          }
+        </span>
+        <button type="button" (click)="selectAll()" class="text-sm font-medium text-blue-600 dark:text-blue-400">Select all</button>
+        @if (selectedCount() > 0) {
+          <button type="button" (click)="clearSelection()" class="text-sm text-ink-secondary dark:text-slate-400">Clear</button>
+        }
+      } @else {
+        <span class="text-sm text-ink-secondary dark:text-slate-400">Click a tile to preview · turn on Select to multi-select / copy</span>
+      }
+      <button
+        type="button"
+        (click)="deleteSelected()"
+        [disabled]="selectedCount() === 0 || deleting() || loading() || scanning()"
+        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
+        <span class="material-icons-outlined !text-lg">delete</span>
+        Delete
+      </button>
+    </div>
+
+    @if (items().length === 0 && scanning()) {
+      <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+        @for (i of [1, 2, 3, 4, 5, 6]; track i) {
+          <div class="w-full aspect-[9/16] rounded-2xl bg-[#f1f1f1] dark:bg-slate-800 animate-pulse"></div>
+        }
+      </div>
+    } @else if (items().length === 0) {
+      <p class="py-10 text-center text-sm text-ink-secondary dark:text-slate-400">
+        No {{ mediaFilter() === 'video' ? 'videos' : mediaFilter() === 'image' ? 'images' : mediaFilter() === 'junk' ? 'junk files' : 'files' }} match this filter.
+      </p>
+    } @else {
+      <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+        @for (item of items(); track item.rel_path) {
+          <button
+            type="button"
+            draggable="true"
+            (dragstart)="onDragStart($event, item)"
+            (click)="onTileClick(item, $event)"
+            [attr.title]="item.rel_path"
+            class="group relative w-full aspect-[9/16] overflow-hidden rounded-2xl bg-[#1a1a1a] text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500"
+            [class.ring-2]="isSelected(item.rel_path) || item.copied"
+            [class.ring-blue-500]="isSelected(item.rel_path)"
+            [class.ring-emerald-400]="item.copied && !isSelected(item.rel_path)"
+            [class.ring-offset-2]="item.copied || isSelected(item.rel_path)">
+            @if (item.kind === 'junk' || thumbFailed().has(item.rel_path)) {
+              <div class="flex h-full w-full flex-col items-center justify-center gap-2 text-white/80">
+                <span class="material-icons-outlined !text-3xl">{{ item.kind === 'junk' ? 'broken_image' : 'image' }}</span>
+                <span class="px-2 text-center text-[11px] break-all">{{ item.name }}</span>
+              </div>
+            } @else if (item.kind === 'video') {
+              <img
+                [appLazyThumb]="item.thumb_url"
+                [alt]="item.name"
+                class="h-full w-full object-cover"
+                (error)="onThumbError(item.rel_path)" />
+              @if (playback.autoplay()) {
+                <video
+                  [appLazyAutoplayVideo]="item.url"
+                  muted
+                  playsinline
+                  loop
+                  class="pointer-events-none absolute inset-0 h-full w-full object-cover"></video>
+              }
+              <span class="pointer-events-none absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
+                <span class="material-icons-outlined !text-[18px]">play_arrow</span>
+              </span>
+            } @else {
+              <img
+                [appLazyThumb]="item.thumb_url || item.url"
+                [alt]="item.name"
+                class="h-full w-full object-cover"
+                (error)="onThumbError(item.rel_path)" />
+            }
+            @if (item.copied) {
+              <span class="absolute left-2 top-2 rounded-md bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">Copied</span>
+            }
+            <span class="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-6 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+              {{ item.name }}
+            </span>
+          </button>
+        }
+      </div>
+    }
+  }
+</div>
+
+@if (preview(); as item) {
+  <div
+    class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'Preview ' + item.name"
+    (click)="closePreview()">
+    <div
+      class="relative flex max-h-[90vh] max-w-[min(960px,100%)] flex-col overflow-hidden rounded-2xl bg-black shadow-2xl"
+      (click)="$event.stopPropagation()">
+      <div class="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
+        <p class="min-w-0 truncate text-sm text-white/90">{{ item.name }}</p>
+        <button
+          type="button"
+          (click)="closePreview()"
+          aria-label="Close preview"
+          class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white">
+          <span class="material-icons-outlined !text-xl">close</span>
+        </button>
+      </div>
+      <div class="flex max-h-[calc(90vh-3rem)] items-center justify-center bg-black">
+        @if (item.kind === 'video') {
+          <video
+            [src]="item.url"
+            controls
+            autoplay
+            playsinline
+            class="max-h-[calc(90vh-3rem)] max-w-full"></video>
+        } @else {
+          <img [src]="item.url" [alt]="item.name" class="max-h-[calc(90vh-3rem)] max-w-full object-contain" />
+        }
+      </div>
+    </div>
+  </div>
+}

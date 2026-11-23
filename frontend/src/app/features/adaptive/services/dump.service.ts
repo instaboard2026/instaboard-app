@@ -61,6 +61,8 @@ export interface DownloadsInfo {
   tools_available: boolean;
   picker_available: boolean;
   cookies_browser: string;
+  free_bytes?: number;
+  total_bytes?: number;
 }
 
 interface ApiWrapper<T> {
@@ -173,6 +175,43 @@ export class DumpService {
         return throwError(() => new Error(capitalize(message)));
       })
     );
+  }
+
+  /**
+   * Moves Local media files into Home or a Dump folder as save cards (files leave Local media).
+   */
+  promoteFromLocalMedia(ids: number[], scope: MoveTarget = 'dump'): Observable<Save[]> {
+    const list = ids.filter((id) => Number.isFinite(id) && id > 0);
+    if (!list.length) {
+      return throwError(() => new Error('Nothing to move.'));
+    }
+    const headers = this.authHeaders();
+    if (!headers) {
+      return throwError(() => new Error('Please sign in.'));
+    }
+    const folder_id = scope === 'dump' ? null : scope;
+    return this.http
+      .post<ApiWrapper<Save[]>>(`${environment.apiUrl}/api/dump/from-local-media`, { ids: list, folder_id }, { headers })
+      .pipe(
+        map((res) => {
+          if (res?.status !== 'SUCCESS' || !Array.isArray(res.data)) {
+            throw new Error(res?.message || 'Could not move those files.');
+          }
+          return res.data;
+        }),
+        tap((saves) => {
+          for (const save of [...saves].reverse()) {
+            this.putSave(save, scope);
+          }
+        }),
+        catchError((err: unknown) => {
+          const message =
+            err instanceof HttpErrorResponse
+              ? err.error?.message || 'Could not move those files. Please try again.'
+              : (err as Error)?.message || 'Could not move those files.';
+          return throwError(() => new Error(capitalize(message)));
+        }),
+      );
   }
 
   /**

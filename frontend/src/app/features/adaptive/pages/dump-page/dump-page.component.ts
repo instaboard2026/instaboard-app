@@ -14,10 +14,11 @@ import { catchError, concatMap, finalize, tap, toArray } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 import { DownloadStats, DumpService, MoveTarget, Save, SaveScope, SaveSource } from '../../services/dump.service';
 import { FoldersService } from '../../services/folders.service';
-import { CardDragService, isCalendarDrop, isSplitDrop } from '../../services/card-drag.service';
+import { CardDragService, isCalendarDrop, isLocalMediaDrop, isSplitDrop } from '../../services/card-drag.service';
 import { CalendarScheduleService } from '../../services/calendar-schedule.service';
 import { PlaybackService } from '../../services/playback.service';
 import { ConfirmDialogService } from '../../services/confirm-dialog.service';
+import { LocalMediaService } from '../../services/local-media.service';
 import { SplitService } from '../../services/split.service';
 import { CdkDrag, CdkDragDrop, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { UserContextService } from '../../services/user-context.service';
@@ -67,6 +68,7 @@ const IMAGE_FILE_RE = /\.(png|jpe?g|webp|gif)$/i;
 export class DumpPageComponent {
   private dumpService = inject(DumpService);
   private foldersService = inject(FoldersService);
+  private localMedia = inject(LocalMediaService);
   private router = inject(Router);
   private title = inject(Title);
   private cardDrag = inject(CardDragService);
@@ -537,6 +539,10 @@ export class DumpPageComponent {
       });
       return;
     }
+    if (isLocalMediaDrop(target)) {
+      this.moveSaveToLocalMedia(save, target.folderId);
+      return;
+    }
     if (target === 'bin') {
       if (this.scope() !== 'bin') this.foldersService.deleteSave(save);
     } else if (target !== null) {
@@ -546,12 +552,33 @@ export class DumpPageComponent {
     }
   }
 
-  /** Folder/bin targets ignore the current board scope; calendar and split always count. */
+  /** Folder/bin targets ignore the current board scope; calendar, split, and Local media always count. */
   private resolveDropTarget(x: number, y: number) {
     const target = this.cardDrag.targetAt(x, y);
     if (target === null) return null;
-    if (isCalendarDrop(target) || isSplitDrop(target)) return target;
+    if (isCalendarDrop(target) || isSplitDrop(target) || isLocalMediaDrop(target)) return target;
     return target !== this.scope() ? target : null;
+  }
+
+  private moveSaveToLocalMedia(save: Save, folderId: number): void {
+    if (!save.download?.files) {
+      this.foldersService.showNotice('Download this item first, then move it to Local media.');
+      return;
+    }
+    const from = (this.dumpService.takeSave(save.id) ??
+      (save.deleted_at ? 'bin' : (save.folder_id ?? 'dump'))) as SaveScope;
+    this.foldersService.noteRemovedSaves(from, 1);
+    this.localMedia.importFromSave(folderId, save.id).subscribe({
+      next: (res) => {
+        const n = res.imported || 1;
+        this.foldersService.showNotice(`Moved ${n} file${n === 1 ? '' : 's'} to Local media.`);
+      },
+      error: (err: Error) => {
+        this.dumpService.putSave(save, from);
+        this.foldersService.noteRemovedSaves(from, -1);
+        this.foldersService.showNotice(err.message);
+      },
+    });
   }
 
   download(save: Save): void {

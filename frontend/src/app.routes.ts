@@ -23,6 +23,18 @@ export const AppRoutes: Routes = [
     title: 'Instaboard - Split video'
   },
   {
+    path: 'camera',
+    loadComponent: () => import('./app/features/adaptive/pages/camera-page/camera-page.component')
+      .then(c => c.CameraPageComponent),
+    title: 'Instaboard - Manage camera'
+  },
+  {
+    path: 'local-media/:id',
+    loadComponent: () => import('./app/features/adaptive/pages/local-media-page/local-media-page.component')
+      .then(c => c.LocalMediaPageComponent),
+    title: 'Instaboard - Local media'
+  },
+  {
     path: 'folders/:id',
     loadComponent: () => import('./app/features/adaptive/pages/dump-page/dump-page.component')
       .then(c => c.DumpPageComponent),

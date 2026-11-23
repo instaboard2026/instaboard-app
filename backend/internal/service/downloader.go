@@ -157,6 +157,69 @@ func (d *Downloader) Status(dir string, id uint64) *DownloadState {
 	return nil
 }
 
+// AdoptLocalFile moves (or copies) an on-disk file into the download folder for save id.
+// Videos become <id>.mp4 when the source is .mp4; other media uses the post layout <id>/1.<ext>.
+func (d *Downloader) AdoptLocalFile(dir string, id uint64, srcPath string) (*DownloadState, error) {
+	fi, err := os.Stat(srcPath)
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("source file missing")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create download folder: %w", err)
+	}
+	_ = d.RemoveFiles(dir, id)
+
+	ext := strings.ToLower(filepath.Ext(srcPath))
+	name := strconv.FormatUint(id, 10)
+	var dest string
+	var kind string
+	if MediaType(srcPath) == "video" && ext == ".mp4" {
+		dest = filepath.Join(dir, name+".mp4")
+		kind = DownloadKindVideo
+	} else {
+		if ext == "" || strings.ContainsAny(ext, `/\`) {
+			return nil, fmt.Errorf("invalid file extension")
+		}
+		postDir := filepath.Join(dir, name)
+		if err := os.MkdirAll(postDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create save folder: %w", err)
+		}
+		dest = filepath.Join(postDir, "1"+ext)
+		kind = DownloadKindPost
+	}
+
+	if err := moveFile(srcPath, dest); err != nil {
+		_ = d.RemoveFiles(dir, id)
+		return nil, err
+	}
+	return &DownloadState{Kind: kind, Files: 1}, nil
+}
+
+func moveFile(src, dest string) error {
+	if err := os.Rename(src, dest); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(dest)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dest)
+		return err
+	}
+	return os.Remove(src)
+}
+
 // StoreLocalImage writes a dropped/uploaded image as <id>/1.<ext> (same layout as a photo post).
 // ext must include the leading dot (e.g. ".png").
 func (d *Downloader) StoreLocalImage(dir string, id uint64, ext string, r io.Reader) (*DownloadState, error) {

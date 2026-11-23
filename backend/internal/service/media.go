@@ -64,7 +64,7 @@ func (m *MediaSigner) Verify(userID int64, saveID uint64, file, expStr, sig stri
 // MediaType classifies a file by extension.
 func MediaType(file string) string {
 	switch strings.ToLower(filepath.Ext(file)) {
-	case ".mp4", ".webm", ".mov", ".m4v":
+	case ".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".m2ts", ".3gp":
 		return "video"
 	default:
 		return "image"
@@ -97,4 +97,108 @@ func (m *MediaSigner) VerifySplit(userID int64, projectID uint64, file, expStr, 
 		return false
 	}
 	return hmac.Equal([]byte(sig), []byte(m.splitSignature(userID, projectID, file, exp)))
+}
+
+func (m *MediaSigner) cameraSignature(userID int64, file string, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/camera/%d/%s/%d", userID, file, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// CameraURL returns a signed URL for a file under the user's camera root (rel path, slash-separated).
+func (m *MediaSigner) CameraURL(userID int64, relPath string) MediaItem {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.cameraSignature(userID, relPath, exp))
+	escaped := strings.ReplaceAll(url.PathEscape(relPath), "%2F", "/")
+	return MediaItem{
+		URL:  fmt.Sprintf("%s/media/camera/%d/%s?%s", m.baseURL, userID, escaped, q.Encode()),
+		Type: MediaType(relPath),
+	}
+}
+
+// VerifyCamera checks a camera media URL's signature and expiry.
+func (m *MediaSigner) VerifyCamera(userID int64, file, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.cameraSignature(userID, file, exp)))
+}
+
+func (m *MediaSigner) localMediaSignature(userID int64, itemID uint64, file string, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/local-media/%d/%d/%s/%d", userID, itemID, file, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// LocalMediaURL returns a signed URL for a Local media library file.
+func (m *MediaSigner) LocalMediaURL(userID int64, itemID uint64, file string) MediaItem {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.localMediaSignature(userID, itemID, file, exp))
+	return MediaItem{
+		URL:  fmt.Sprintf("%s/media/local-media/%d/%d/%s?%s", m.baseURL, userID, itemID, url.PathEscape(file), q.Encode()),
+		Type: MediaType(file),
+	}
+}
+
+// VerifyLocalMedia checks a Local media URL's signature and expiry.
+func (m *MediaSigner) VerifyLocalMedia(userID int64, itemID uint64, file, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.localMediaSignature(userID, itemID, file, exp)))
+}
+
+func (m *MediaSigner) localMediaThumbSignature(userID int64, itemID uint64, file string, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/local-media-thumb/%d/%d/%s/%d", userID, itemID, file, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// LocalMediaThumbURL returns a signed URL for a JPEG thumbnail of a Local media file.
+func (m *MediaSigner) LocalMediaThumbURL(userID int64, itemID uint64, file string) string {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.localMediaThumbSignature(userID, itemID, file, exp))
+	return fmt.Sprintf("%s/media/local-media-thumb/%d/%d/%s?%s", m.baseURL, userID, itemID, url.PathEscape(file), q.Encode())
+}
+
+// VerifyLocalMediaThumb checks a Local media thumbnail URL's signature and expiry.
+func (m *MediaSigner) VerifyLocalMediaThumb(userID int64, itemID uint64, file, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.localMediaThumbSignature(userID, itemID, file, exp)))
+}
+
+func (m *MediaSigner) cameraThumbSignature(userID int64, file string, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/camera-thumb/%d/%s/%d", userID, file, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// CameraThumbURL returns a signed URL for a JPEG thumbnail of a camera file.
+func (m *MediaSigner) CameraThumbURL(userID int64, relPath string) string {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.cameraThumbSignature(userID, relPath, exp))
+	escaped := strings.ReplaceAll(url.PathEscape(relPath), "%2F", "/")
+	return fmt.Sprintf("%s/media/camera-thumb/%d/%s?%s", m.baseURL, userID, escaped, q.Encode())
+}
+
+// VerifyCameraThumb checks a camera thumbnail URL's signature and expiry.
+func (m *MediaSigner) VerifyCameraThumb(userID int64, file, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.cameraThumbSignature(userID, file, exp)))
 }

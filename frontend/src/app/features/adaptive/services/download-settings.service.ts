@@ -28,6 +28,15 @@ export class DownloadSettingsService {
   /** Last path segment, for the footer button label. */
   readonly folderName = computed(() => this.info()?.dir.split('/').filter(Boolean).pop() ?? null);
 
+  /** This Mac’s volume free / total (from the download folder’s disk). */
+  readonly diskLabel = computed(() => {
+    const i = this.info();
+    const free = i?.free_bytes ?? 0;
+    const total = i?.total_bytes ?? 0;
+    if (total <= 0) return null;
+    return `${formatDiskBytes(free)} free of ${formatDiskBytes(total)}`;
+  });
+
   load(): void {
     this.dumpService.downloadsInfo().subscribe({ next: (info) => this.info.set(info), error: () => {} });
   }
@@ -97,4 +106,17 @@ export class DownloadSettingsService {
     this.info.set(info);
     this.dumpService.load().subscribe({ error: () => {} });
   }
+}
+
+function formatDiskBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  const digits = i === 0 ? 0 : n >= 10 ? 0 : 1;
+  return `${n.toFixed(digits)} ${units[i]}`;
 }

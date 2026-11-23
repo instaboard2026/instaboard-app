@@ -13,7 +13,9 @@ import { UserContextService } from '../../../services/user-context.service';
 import { AccountMenuModalService } from '../../../services/account-menu-modal.service';
 import { DumpService } from '../../../services/dump.service';
 import { Folder, FoldersService } from '../../../services/folders.service';
+import { LocalMediaFolder, LocalMediaService } from '../../../services/local-media.service';
 import { CardDragService } from '../../../services/card-drag.service';
+import { CameraDragService } from '../../../services/camera-drag.service';
 import { ConfirmDialogService } from '../../../services/confirm-dialog.service';
 import { AutofocusSelectDirective } from '../../directives/autofocus-select.directive';
 import { TooltipDirective } from '../../directives/tooltip.directive';
@@ -32,13 +34,21 @@ export class SidebarComponent {
   private router = inject(Router);
   private confirm = inject(ConfirmDialogService);
   readonly foldersService = inject(FoldersService);
+  readonly localMediaService = inject(LocalMediaService);
   readonly cardDrag = inject(CardDragService);
+  readonly cameraDrag = inject(CameraDragService);
 
   readonly folders = this.foldersService.folders;
   readonly renamingId = this.foldersService.renamingId;
   readonly menuOpenId = signal<number | null>(null);
   readonly renameError = signal<string | null>(null);
   readonly creating = signal(false);
+
+  readonly localMediaFolders = this.localMediaService.folders;
+  readonly localMediaRenamingId = this.localMediaService.renamingId;
+  readonly localMediaMenuOpenId = signal<number | null>(null);
+  readonly localMediaRenameError = signal<string | null>(null);
+  readonly creatingLocalMedia = signal(false);
   private readonly currentPath = toSignal(
     this.router.events.pipe(
       filter((e): e is NavigationEnd => e instanceof NavigationEnd),
@@ -49,6 +59,8 @@ export class SidebarComponent {
   /** Set while a folder row is being dragged, so the click that ends the drag doesn't navigate. */
   private reordering = false;
   private savingRename = false;
+  private localMediaReordering = false;
+  private savingLocalMediaRename = false;
 
   constructor() {
     effect(() => {
@@ -56,6 +68,7 @@ export class SidebarComponent {
         untracked(() => {
           this.dumpService.clear();
           this.foldersService.clear();
+          this.localMediaService.clear();
         });
         return;
       }
@@ -66,6 +79,9 @@ export class SidebarComponent {
         if (!this.foldersService.loaded()) {
           this.foldersService.load();
         }
+        if (!this.localMediaService.loaded()) {
+          this.localMediaService.loadFolders();
+        }
       });
     });
   }
@@ -73,6 +89,7 @@ export class SidebarComponent {
   @HostListener('document:click')
   closeMenu(): void {
     this.menuOpenId.set(null);
+    this.localMediaMenuOpenId.set(null);
   }
 
   createFolder(): void {
@@ -171,6 +188,109 @@ export class SidebarComponent {
 
   isActiveFolder(folder: Folder): boolean {
     return this.currentPath() === `/folders/${folder.id}`;
+  }
+
+  createLocalMediaFolder(): void {
+    if (this.creatingLocalMedia()) return;
+    this.creatingLocalMedia.set(true);
+    this.localMediaRenameError.set(null);
+    this.localMediaService.createFolder().subscribe({
+      next: () => this.creatingLocalMedia.set(false),
+      error: () => this.creatingLocalMedia.set(false),
+    });
+  }
+
+  createLocalMediaFolderFromRail(): void {
+    this.expandSidebar.emit();
+    this.createLocalMediaFolder();
+  }
+
+  startLocalMediaRename(folder: LocalMediaFolder, event?: Event): void {
+    event?.stopPropagation();
+    this.localMediaMenuOpenId.set(null);
+    this.localMediaRenameError.set(null);
+    this.localMediaRenamingId.set(folder.id);
+  }
+
+  commitLocalMediaRename(folder: LocalMediaFolder, value: string): void {
+    if (this.localMediaRenamingId() !== folder.id || this.savingLocalMediaRename) return;
+    const name = value.trim();
+    if (!name || name === folder.name) {
+      this.cancelLocalMediaRename();
+      return;
+    }
+    this.savingLocalMediaRename = true;
+    this.localMediaService.renameFolder(folder.id, name).subscribe({
+      next: () => {
+        this.savingLocalMediaRename = false;
+        this.cancelLocalMediaRename();
+      },
+      error: (err: Error) => {
+        this.savingLocalMediaRename = false;
+        this.localMediaRenameError.set(err.message);
+      },
+    });
+  }
+
+  cancelLocalMediaRename(): void {
+    this.localMediaRenameError.set(null);
+    this.localMediaRenamingId.set(null);
+  }
+
+  toggleLocalMediaMenu(folder: LocalMediaFolder, event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.localMediaMenuOpenId.update((id) => (id === folder.id ? null : folder.id));
+  }
+
+  moveLocalMediaFolder(index: number, delta: number, event: Event): void {
+    event.stopPropagation();
+    this.localMediaMenuOpenId.set(null);
+    this.localMediaService.reorderFolders(index, index + delta);
+  }
+
+  async deleteLocalMediaFolder(folder: LocalMediaFolder, event: Event): Promise<void> {
+    event.stopPropagation();
+    this.localMediaMenuOpenId.set(null);
+    const items = folder.count === 1 ? '1 file' : `${folder.count} files`;
+    const ok = await this.confirm.ask({
+      title: `Delete "${folder.name}"?`,
+      message:
+        folder.count > 0
+          ? `This deletes the folder and its ${items} from Local media.`
+          : 'This folder is empty.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    this.localMediaService.removeFolder(folder.id).subscribe({
+      next: () => {
+        if (this.router.url.split('?')[0] === `/local-media/${folder.id}`) {
+          this.router.navigate(['/camera']);
+        }
+      },
+      error: () => {},
+    });
+  }
+
+  onLocalMediaReorderStarted(): void {
+    this.localMediaReordering = true;
+    this.localMediaMenuOpenId.set(null);
+  }
+
+  onLocalMediaReorderDropped(event: CdkDragDrop<LocalMediaFolder[]>): void {
+    this.localMediaService.reorderFolders(event.previousIndex, event.currentIndex);
+    setTimeout(() => (this.localMediaReordering = false));
+  }
+
+  openLocalMediaFolder(folder: LocalMediaFolder): void {
+    if (this.localMediaReordering || this.localMediaRenamingId() === folder.id) return;
+    this.router.navigate(['/local-media', folder.id]);
+    this.onNavLinkClick();
+  }
+
+  isActiveLocalMediaFolder(folder: LocalMediaFolder): boolean {
+    return this.currentPath() === `/local-media/${folder.id}`;
   }
 
   isActiveBin(): boolean {

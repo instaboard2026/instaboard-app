@@ -188,6 +188,16 @@ export class FoldersService {
     });
   }
 
+  /** Bumps a Home/folder badge count after promoting Local media into Dump. */
+  noteAddedSaves(scope: MoveTarget, count: number): void {
+    if (count) this.adjustCount(scope, count);
+  }
+
+  /** Lowers a Home/folder/bin badge after a save was removed (e.g. moved into Local media). */
+  noteRemovedSaves(scope: SaveScope, count: number): void {
+    if (count) this.adjustCount(scope, -count);
+  }
+
   showNotice(message: string): void {
     this.notice.set(message);
     if (this.noticeTimer) clearTimeout(this.noticeTimer);

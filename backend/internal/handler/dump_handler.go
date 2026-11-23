@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -39,6 +40,8 @@ type downloadsInfo struct {
 	ToolsAvailable  bool   `json:"tools_available"`
 	PickerAvailable bool   `json:"picker_available"`
 	CookiesBrowser  string `json:"cookies_browser"`
+	FreeBytes       uint64 `json:"free_bytes,omitempty"`
+	TotalBytes      uint64 `json:"total_bytes,omitempty"`
 }
 
 // DumpHandler handles the user's Dump and downloading its links (authenticated).
@@ -47,13 +50,24 @@ type DumpHandler struct {
 	settings       *repository.SettingsRepo
 	downloader     *service.Downloader
 	media          *service.MediaSigner
+	local          *repository.LocalMediaRepo
 	defaultDir     string
 	cookiesBrowser string
 }
 
 // NewDumpHandler creates a new DumpHandler. defaultDir is used until a user picks their own folder.
-func NewDumpHandler(repo *repository.SaveRepo, settings *repository.SettingsRepo, downloader *service.Downloader, media *service.MediaSigner, defaultDir, cookiesBrowser string) *DumpHandler {
-	return &DumpHandler{repo: repo, settings: settings, downloader: downloader, media: media, defaultDir: defaultDir, cookiesBrowser: cookiesBrowser}
+func NewDumpHandler(
+	repo *repository.SaveRepo,
+	settings *repository.SettingsRepo,
+	downloader *service.Downloader,
+	media *service.MediaSigner,
+	local *repository.LocalMediaRepo,
+	defaultDir, cookiesBrowser string,
+) *DumpHandler {
+	return &DumpHandler{
+		repo: repo, settings: settings, downloader: downloader, media: media, local: local,
+		defaultDir: defaultDir, cookiesBrowser: cookiesBrowser,
+	}
 }
 
 // withMedia adds signed URLs and the on-disk path for the save's downloaded files.
@@ -81,7 +95,7 @@ func (h *DumpHandler) downloadDir(r *http.Request, userID int64) (dir string, is
 func (h *DumpHandler) info(r *http.Request, userID int64) downloadsInfo {
 	dir, isDefault := h.downloadDir(r, userID)
 	fi, err := os.Stat(dir)
-	return downloadsInfo{
+	out := downloadsInfo{
 		Dir:             dir,
 		IsDefault:       isDefault,
 		Exists:          (err == nil && fi.IsDir()) || isDefault,
@@ -89,6 +103,19 @@ func (h *DumpHandler) info(r *http.Request, userID int64) downloadsInfo {
 		PickerAvailable: service.PickerAvailable(),
 		CookiesBrowser:  h.cookiesBrowser,
 	}
+	spacePath := dir
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			spacePath = home
+		} else {
+			spacePath = "/"
+		}
+	}
+	if ds, dsErr := service.DiskSpaceForPath(spacePath); dsErr == nil {
+		out.FreeBytes = ds.FreeBytes
+		out.TotalBytes = ds.TotalBytes
+	}
+	return out
 }
 
 // saveViews turns saves into API responses with their download state and signed media URLs.
@@ -297,6 +324,86 @@ func (h *DumpHandler) Download(w http.ResponseWriter, r *http.Request) {
 	utils.WriteSuccess(w, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
 }
 
+// PromoteFromLocalMedia moves Local media files into Home or a Dump folder as local save cards.
+func (h *DumpHandler) PromoteFromLocalMedia(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	if h.local == nil {
+		utils.WriteError(w, http.StatusInternalServerError, "local media unavailable", nil)
+		return
+	}
+	var body struct {
+		IDs      []uint64 `json:"ids"`
+		FolderID *int64   `json:"folder_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.IDs) == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "ids required", nil)
+		return
+	}
+	if body.FolderID != nil && *body.FolderID <= 0 {
+		utils.WriteError(w, http.StatusBadRequest, "invalid folder id", nil)
+		return
+	}
+
+	dir, _ := h.downloadDir(r, userID)
+	lmDir := filepath.Join(dir, "local-media", strconv.FormatInt(userID, 10))
+	out := make([]saveResponse, 0, len(body.IDs))
+
+	for _, id := range body.IDs {
+		item, err := h.local.GetItem(r.Context(), userID, id)
+		if errors.Is(err, repository.ErrLocalMediaNotFound) {
+			utils.WriteError(w, http.StatusNotFound, "local media file not found", nil)
+			return
+		}
+		if err != nil {
+			slog.Error("get local media for promote failed", "err", err)
+			utils.WriteError(w, http.StatusInternalServerError, "could not move files", nil)
+			return
+		}
+		base := filepath.Base(item.StoredName)
+		if base != item.StoredName || strings.Contains(base, "..") {
+			utils.WriteError(w, http.StatusBadRequest, "invalid local media file", nil)
+			return
+		}
+		src := filepath.Join(lmDir, base)
+
+		url, err := newLocalURL()
+		if err != nil {
+			slog.Error("local url failed", "err", err)
+			utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
+			return
+		}
+		save, err := h.repo.Insert(r.Context(), userID, url, service.SourceLocal, "local-media", body.FolderID)
+		switch {
+		case errors.Is(err, repository.ErrFolderNotFound):
+			utils.WriteError(w, http.StatusNotFound, "folder not found", nil)
+			return
+		case err != nil:
+			slog.Error("insert promoted save failed", "err", err)
+			utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
+			return
+		}
+
+		state, storeErr := h.downloader.AdoptLocalFile(dir, save.ID, src)
+		if storeErr != nil {
+			h.removeDownloadFiles(r, userID, save.ID)
+			_ = h.repo.Delete(r.Context(), userID, save.ID)
+			slog.Error("adopt local media failed", "item", id, "err", storeErr)
+			utils.WriteError(w, http.StatusInternalServerError, "could not move file into folder", nil)
+			return
+		}
+		if _, err := h.local.DeleteItem(r.Context(), userID, id); err != nil {
+			slog.Warn("promoted save but local media row remains", "item", id, "err", err)
+		}
+		out = append(out, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
+	}
+
+	utils.WriteJSON(w, http.StatusCreated, utils.APIResponse{Status: "SUCCESS", Data: out})
+}
+
 // RevealInFinder opens the downloaded file for this save in Finder (macOS) or the file manager.
 func (h *DumpHandler) RevealInFinder(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
@@ -343,6 +450,18 @@ func revealInFileManager(path string) error {
 		return exec.Command("explorer", "/select,", path).Start()
 	default:
 		return exec.Command("xdg-open", filepath.Dir(path)).Start()
+	}
+}
+
+// openInFileManager opens a directory in Finder / Explorer / the file manager.
+func openInFileManager(dir string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", dir).Start()
+	case "windows":
+		return exec.Command("explorer", dir).Start()
+	default:
+		return exec.Command("xdg-open", dir).Start()
 	}
 }
 
