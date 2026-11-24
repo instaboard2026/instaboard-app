@@ -14,6 +14,8 @@ export type CameraScanStatus = 'idle' | 'running' | 'done' | 'error';
 
 export type CameraKindFilter = 'all' | 'video' | 'image' | 'junk';
 
+export type CameraSortOrder = 'latest' | 'oldest';
+
 export interface CameraStatus {
   root?: string;
   label?: string;
@@ -85,6 +87,7 @@ export class CameraService {
   readonly loading = signal(false);
   readonly scanning = signal(false);
   readonly pageKind = signal<CameraKindFilter>('all');
+  readonly pageSort = signal<CameraSortOrder>('latest');
   readonly pageIndex = signal(0); // 0-based
   readonly pageSize = signal(12);
   readonly total = signal(0);
@@ -186,15 +189,17 @@ export class CameraService {
     pageIndex: number,
     kind: CameraKindFilter = 'all',
     pageSize?: number,
+    sort: CameraSortOrder = 'latest',
   ): Observable<CameraItemsPage> {
     const size = pageSize ?? this.pageSize();
     this.pageKind.set(kind);
+    this.pageSort.set(sort);
     this.pageSize.set(size);
     const page = Math.max(0, pageIndex);
     this.pageIndex.set(page);
     this.loading.set(true);
     const offset = page * size;
-    return this.fetchOffset(offset, size, kind).pipe(
+    return this.fetchOffset(offset, size, kind, sort).pipe(
       tap((data) => {
         this.applyPage(data);
         this.loading.set(false);
@@ -221,12 +226,16 @@ export class CameraService {
   }
 
   /** Poll status while scanning; refresh current page periodically. */
-  pollWhileScanning(kind: CameraKindFilter, pageSize: number): Observable<CameraStatus> {
+  pollWhileScanning(
+    kind: CameraKindFilter,
+    pageSize: number,
+    sort: CameraSortOrder = 'latest',
+  ): Observable<CameraStatus> {
     return timer(0, 1500).pipe(
       switchMap(() => this.loadStatus()),
       tap((s) => {
         if (s.scan === 'running') {
-          this.fetchOffset(this.pageIndex() * pageSize, pageSize, kind).subscribe({
+          this.fetchOffset(this.pageIndex() * pageSize, pageSize, kind, sort).subscribe({
             next: (page) => this.applyPage(page),
             error: () => {},
           });
@@ -265,10 +274,16 @@ export class CameraService {
     this.pageIndex.set(0);
   }
 
-  private fetchOffset(offset: number, limit: number, kind: CameraKindFilter): Observable<CameraItemsPage> {
+  private fetchOffset(
+    offset: number,
+    limit: number,
+    kind: CameraKindFilter,
+    sort: CameraSortOrder = 'latest',
+  ): Observable<CameraItemsPage> {
     let params = new HttpParams()
       .set('limit', String(limit))
-      .set('offset', String(offset));
+      .set('offset', String(offset))
+      .set('sort', sort);
     if (kind !== 'all') params = params.set('kind', kind);
     return this.http.get<ApiWrapper<CameraItemsPage>>(`${environment.apiUrl}/api/camera/items`, {
       headers: this.authHeaders(),

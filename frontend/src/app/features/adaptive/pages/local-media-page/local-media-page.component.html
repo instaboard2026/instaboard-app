@@ -193,9 +193,18 @@
       }
       <button
         type="button"
+        (click)="shareSelected()"
+        [disabled]="selectedCount() === 0 || sharing() || deleting() || loading()"
+        title="Share selected files (AirDrop via Safari system share sheet)"
+        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
+        <span class="material-icons-outlined !text-lg">ios_share</span>
+        {{ sharing() ? 'Sharing…' : 'Share' }}
+      </button>
+      <button
+        type="button"
         (click)="deleteSelected()"
-        [disabled]="selectedCount() === 0 || deleting() || loading()"
-        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
+        [disabled]="selectedCount() === 0 || deleting() || sharing() || loading()"
+        class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
         <span class="material-icons-outlined !text-lg">delete</span>
         Delete
       </button>

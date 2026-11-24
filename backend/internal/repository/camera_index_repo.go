@@ -99,26 +99,47 @@ func (r *CameraIndexRepo) CountByKind(ctx context.Context, userID int64, kind st
 	return r.Count(ctx, userID)
 }
 
-// ListOffset returns a page by offset/limit, ordered by rel_path.
-func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind string, offset, limit int) ([]CameraIndexRow, error) {
+// CameraSortLatest / CameraSortOldest control ListOffset ordering by mtime_ns.
+const (
+	CameraSortLatest = "latest"
+	CameraSortOldest = "oldest"
+)
+
+func normalizeCameraSort(sort string) string {
+	if sort == CameraSortOldest {
+		return CameraSortOldest
+	}
+	return CameraSortLatest
+}
+
+func cameraMtimeOrderSQL(sort string) string {
+	if normalizeCameraSort(sort) == CameraSortOldest {
+		return "mtime_ns ASC, rel_path ASC"
+	}
+	return "mtime_ns DESC, rel_path ASC"
+}
+
+// ListOffset returns a page by offset/limit, ordered by mtime (latest or oldest).
+func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind string, offset, limit int, sort string) ([]CameraIndexRow, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 24
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	order := cameraMtimeOrderSQL(sort)
 	var rows *sql.Rows
 	var err error
 	if kind == "image" || kind == "video" || kind == "junk" {
 		rows, err = r.db.QueryContext(ctx,
 			`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-			 WHERE user_id = ? AND kind = ? ORDER BY rel_path LIMIT ? OFFSET ?`,
+			 WHERE user_id = ? AND kind = ? ORDER BY `+order+` LIMIT ? OFFSET ?`,
 			userID, kind, limit, offset,
 		)
 	} else {
 		rows, err = r.db.QueryContext(ctx,
 			`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-			 WHERE user_id = ? AND kind IN ('image', 'video') ORDER BY rel_path LIMIT ? OFFSET ?`,
+			 WHERE user_id = ? AND kind IN ('image', 'video') ORDER BY `+order+` LIMIT ? OFFSET ?`,
 			userID, limit, offset,
 		)
 	}

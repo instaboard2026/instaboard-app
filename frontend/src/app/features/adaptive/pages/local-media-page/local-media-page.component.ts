@@ -20,6 +20,7 @@ import { LocalMediaItem, LocalMediaService } from '../../services/local-media.se
 import { PlaybackService } from '../../services/playback.service';
 import { UserContextService } from '../../services/user-context.service';
 import { ConfirmDialogService } from '../../services/confirm-dialog.service';
+import { shareFilesFromUrls, shareFilesNotice } from '../../shared/utils/share-files';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
@@ -69,6 +70,7 @@ export class LocalMediaPageComponent {
   readonly loading = signal(false);
   readonly notice = signal<string | null>(null);
   readonly deleting = signal(false);
+  readonly sharing = signal(false);
   readonly openingFinder = signal(false);
   readonly copying = this.localMedia.copying;
   readonly activeCopy = this.localMedia.activeCopy;
@@ -291,6 +293,37 @@ export class LocalMediaPageComponent {
 
   clearSelection(): void {
     this.selected.set(new Set());
+  }
+
+  async shareSelected(): Promise<void> {
+    if (this.sharing() || this.deleting() || this.loading()) return;
+    const sel = this.selected();
+    // Resolve against the full folder list so Share is not limited to the current page.
+    const items = this.allItems().filter((it) => sel.has(it.id));
+    if (!items.length) {
+      this.notice.set('Nothing to share.');
+      return;
+    }
+
+    this.sharing.set(true);
+    this.notice.set(`Preparing ${items.length} file${items.length === 1 ? '' : 's'}…`);
+    try {
+      const result = await shareFilesFromUrls(
+        items.map((it) => ({
+          name: it.original_name,
+          url: it.url,
+          byteSize: it.byte_size || 0,
+        })),
+        {
+          onProgress: (current, total) => {
+            this.notice.set(`Preparing ${current} of ${total}…`);
+          },
+        },
+      );
+      this.notice.set(shareFilesNotice(result));
+    } finally {
+      this.sharing.set(false);
+    }
   }
 
   async deleteSelected(): Promise<void> {

@@ -215,6 +215,47 @@ export class DumpService {
   }
 
   /**
+   * Copies a Split master or clip into Home or a Dump folder as a local save card.
+   * The split project stays put. Pass clipId null for the master.
+   */
+  createFromSplit(projectId: number, clipId: number | null, scope: MoveTarget = 'dump'): Observable<Save> {
+    if (!Number.isFinite(projectId) || projectId <= 0) {
+      return throwError(() => new Error('Invalid split project.'));
+    }
+    if (clipId != null && (!Number.isFinite(clipId) || clipId <= 0)) {
+      return throwError(() => new Error('Invalid split clip.'));
+    }
+    const headers = this.authHeaders();
+    if (!headers) {
+      return throwError(() => new Error('Please sign in.'));
+    }
+    const folder_id = scope === 'dump' ? null : scope;
+    const body: { project_id: number; folder_id: number | null; clip_id?: number } = {
+      project_id: projectId,
+      folder_id,
+    };
+    if (clipId != null) body.clip_id = clipId;
+    return this.http
+      .post<ApiWrapper<Save>>(`${environment.apiUrl}/api/dump/from-split`, body, { headers })
+      .pipe(
+        map((res) => {
+          if (res?.status !== 'SUCCESS' || !res.data) {
+            throw new Error(res?.message || 'Could not add that clip to the folder.');
+          }
+          return res.data;
+        }),
+        tap((save) => this.putSave(save, scope)),
+        catchError((err: unknown) => {
+          const message =
+            err instanceof HttpErrorResponse
+              ? err.error?.message || 'Could not add that clip to the folder. Please try again.'
+              : (err as Error)?.message || 'Could not add that clip to the folder.';
+          return throwError(() => new Error(capitalize(message)));
+        }),
+      );
+  }
+
+  /**
    * Uploads local images into Home or a folder (one card per file, already previewable).
    * Field name must be `file` (repeatable). Bin is not supported.
    */

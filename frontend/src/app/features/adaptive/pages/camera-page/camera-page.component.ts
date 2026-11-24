@@ -9,7 +9,12 @@ import {
   signal,
 } from '@angular/core';
 import { Subscription, takeWhile } from 'rxjs';
-import { CameraItem, CameraKindFilter, CameraService } from '../../services/camera.service';
+import {
+  CameraItem,
+  CameraKindFilter,
+  CameraService,
+  CameraSortOrder,
+} from '../../services/camera.service';
 import { CameraDragService } from '../../services/camera-drag.service';
 import { LocalMediaService } from '../../services/local-media.service';
 import { CacheService } from '../../services/cache.service';
@@ -17,6 +22,7 @@ import { UserContextService } from '../../services/user-context.service';
 import { LazyThumbDirective } from '../../shared/directives/lazy-thumb.directive';
 import { LazyAutoplayVideoDirective } from '../../shared/directives/lazy-autoplay-video.directive';
 import { PlaybackService } from '../../services/playback.service';
+import { shareFilesFromUrls, shareFilesNotice } from '../../shared/utils/share-files';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
@@ -26,6 +32,9 @@ const PAGE_SIZE_KEY = 'camera_page_size';
 const PAGE_SIZE_OPTIONS = [12, 24, 36, 48, 60, 72, 84, 96, 120] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
+const SORT_KEY = 'camera_sort';
+const SORT_OPTIONS = ['latest', 'oldest'] as const satisfies readonly CameraSortOrder[];
+
 type MediaFilter = CameraKindFilter;
 
 const MEDIA_FILTERS: readonly { id: MediaFilter; icon: string; label: string }[] = [
@@ -33,6 +42,11 @@ const MEDIA_FILTERS: readonly { id: MediaFilter; icon: string; label: string }[]
   { id: 'video', icon: 'movie', label: 'Videos' },
   { id: 'image', icon: 'image', label: 'Images' },
   { id: 'junk', icon: 'broken_image', label: 'Junk' },
+];
+
+const SORT_FILTERS: readonly { id: CameraSortOrder; label: string }[] = [
+  { id: 'latest', label: 'Latest' },
+  { id: 'oldest', label: 'Oldest' },
 ];
 
 @Component({
@@ -56,6 +70,8 @@ export class CameraPageComponent implements OnDestroy {
   readonly pageSizeChoice = signal<PageSize>(24);
   readonly mediaFilters = MEDIA_FILTERS;
   readonly mediaFilter = signal<MediaFilter>('all');
+  readonly sortFilters = SORT_FILTERS;
+  readonly sortOrder = signal<CameraSortOrder>('latest');
   readonly items = this.camera.items;
   readonly loading = this.camera.loading;
   readonly scanning = this.camera.scanning;
@@ -75,6 +91,7 @@ export class CameraPageComponent implements OnDestroy {
   readonly notice = signal<string | null>(null);
   readonly opening = signal(false);
   readonly deleting = signal(false);
+  readonly sharing = signal(false);
   readonly copying = this.localMedia.copying;
   readonly activeCopy = this.localMedia.activeCopy;
   readonly copyPercent = this.localMedia.copyPercent;
@@ -149,6 +166,12 @@ export class CameraPageComponent implements OnDestroy {
     }
     effect(() => this.cacheService.setItem(PAGE_SIZE_KEY, this.pageSizeChoice()));
 
+    const savedSort = this.cacheService.getItem<string>(SORT_KEY);
+    if (savedSort !== null && (SORT_OPTIONS as readonly string[]).includes(savedSort)) {
+      this.sortOrder.set(savedSort as CameraSortOrder);
+    }
+    effect(() => this.cacheService.setItem(SORT_KEY, this.sortOrder()));
+
     if (this.user.isLoggedIn()) {
       if (!this.localMedia.loaded()) this.localMedia.loadFolders();
       this.camera.loadStatus().subscribe({
@@ -193,6 +216,14 @@ export class CameraPageComponent implements OnDestroy {
 
   setMediaFilter(filter: MediaFilter): void {
     this.mediaFilter.set(filter);
+    this.selected.set(new Set());
+    this.lastClicked.set(null);
+    this.reloadPage(0).subscribe({ error: (err: Error) => this.notice.set(err.message) });
+  }
+
+  setSortOrder(sort: CameraSortOrder): void {
+    if (this.sortOrder() === sort) return;
+    this.sortOrder.set(sort);
     this.selected.set(new Set());
     this.lastClicked.set(null);
     this.reloadPage(0).subscribe({ error: (err: Error) => this.notice.set(err.message) });
@@ -315,6 +346,32 @@ export class CameraPageComponent implements OnDestroy {
     this.selected.set(new Set());
   }
 
+  async shareSelected(): Promise<void> {
+    if (this.sharing() || this.deleting() || this.loading() || this.scanning()) return;
+    const sel = this.selected();
+    const items = this.items().filter((it) => sel.has(it.rel_path) && it.kind !== 'junk');
+    if (!items.length) {
+      this.notice.set(sel.size > 0 ? 'Nothing to share (junk files skipped).' : 'Nothing to share.');
+      return;
+    }
+
+    this.sharing.set(true);
+    this.notice.set(`Preparing ${items.length} file${items.length === 1 ? '' : 's'}…`);
+    try {
+      const result = await shareFilesFromUrls(
+        items.map((it) => ({ name: it.name, url: it.url, byteSize: it.byte_size || 0 })),
+        {
+          onProgress: (current, total) => {
+            this.notice.set(`Preparing ${current} of ${total}…`);
+          },
+        },
+      );
+      this.notice.set(shareFilesNotice(result));
+    } finally {
+      this.sharing.set(false);
+    }
+  }
+
   deleteSelected(): void {
     const paths = [...this.selected()];
     if (!paths.length || this.deleting()) return;
@@ -408,7 +465,7 @@ export class CameraPageComponent implements OnDestroy {
   }
 
   private reloadPage(pageIndex: number) {
-    return this.camera.loadPage(pageIndex, this.mediaFilter(), this.pageSize());
+    return this.camera.loadPage(pageIndex, this.mediaFilter(), this.pageSize(), this.sortOrder());
   }
 
   private copyToFolder(folderId: number, paths: string[]): void {
@@ -430,16 +487,17 @@ export class CameraPageComponent implements OnDestroy {
   private startScanPoll(): void {
     this.scanSub?.unsubscribe();
     const size = this.pageSize();
-    this.scanSub = this.camera.pollWhileScanning(this.mediaFilter(), size).pipe(
-      takeWhile((s) => s.scan === 'running', true),
-    ).subscribe({
-      next: () => {},
-      error: () => {},
-      complete: () => {
-        this.camera.loadStatus().subscribe({ next: () => {} });
-        this.reloadPage(0).subscribe({ error: () => {} });
-      },
-    });
+    this.scanSub = this.camera
+      .pollWhileScanning(this.mediaFilter(), size, this.sortOrder())
+      .pipe(takeWhile((s) => s.scan === 'running', true))
+      .subscribe({
+        next: () => {},
+        error: () => {},
+        complete: () => {
+          this.camera.loadStatus().subscribe({ next: () => {} });
+          this.reloadPage(0).subscribe({ error: () => {} });
+        },
+      });
   }
 }
 

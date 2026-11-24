@@ -28,6 +28,9 @@ export type LocalMediaDropTarget = { type: 'local-media'; folderId: number };
 /** Drop target for a dragged card. */
 export type DropTarget = FolderDropTarget | CalendarDropTarget | SplitDropTarget | LocalMediaDropTarget;
 
+/** Split master/clip being dragged onto Home or a Dump folder (copy as a new card). */
+export type SplitExportDrag = { projectId: number; clipId: number | null };
+
 export function isCalendarDrop(target: DropTarget | null | undefined): target is CalendarDropTarget {
   return target != null && typeof target === 'object' && target.type === 'calendar';
 }
@@ -44,6 +47,8 @@ export function isLocalMediaDrop(target: DropTarget | null | undefined): target 
 @Injectable({ providedIn: 'root' })
 export class CardDragService {
   readonly dragging = signal<Save | null>(null);
+  /** Split board tile being copied into Home/a folder (not a Save move). */
+  readonly splitExport = signal<SplitExportDrag | null>(null);
   /** Drop target under the pointer, if any. */
   readonly hoverTarget = signal<DropTarget | null>(null);
 
@@ -86,13 +91,10 @@ export class CardDragService {
 
   isHovered(scope: FolderDropTarget): boolean {
     const t = this.hoverTarget();
-    return (
-      this.dragging() !== null &&
-      !isCalendarDrop(t) &&
-      !isSplitDrop(t) &&
-      !isLocalMediaDrop(t) &&
-      t === scope
-    );
+    if (isCalendarDrop(t) || isSplitDrop(t) || isLocalMediaDrop(t) || t !== scope) return false;
+    if (this.dragging() !== null) return true;
+    // Split export copies into Home/folders only — not the Bin.
+    return this.splitExport() !== null && scope !== 'bin';
   }
 
   isLocalMediaHovered(folderId: number): boolean {

@@ -110,7 +110,15 @@
           </div>
 
           <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
-            <div class="min-w-0 flex flex-col gap-1.5">
+            @let masterTile = masterDragData(board);
+            <div
+              cdkDrag
+              [cdkDragData]="masterTile"
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+              (cdkDragStarted)="onTileDragStarted(masterTile)"
+              (cdkDragMoved)="onTileDragMoved($event)"
+              (cdkDragEnded)="onTileDragEnded(masterTile, $event)"
+              class="min-w-0 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing">
               <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card ring-2 ring-purple-500 ring-offset-2 ring-offset-white dark:ring-offset-card-bg dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
                 <video
                   appAutoplayVideo
@@ -127,10 +135,26 @@
                   {{ formatRange(0, board.duration_ms ?? 0) }}
                 </p>
               </div>
+              <div *cdkDragPreview class="flex max-w-[260px] items-center gap-2 rounded-xl border border-blue-500/60 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 shadow-2xl">
+                <span class="flex h-10 w-7 shrink-0 items-center justify-center rounded bg-black text-white"><span class="material-icons-outlined !text-base">play_arrow</span></span>
+                <span class="min-w-0">
+                  <span class="block font-semibold">Add Master</span>
+                  <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
+                </span>
+              </div>
+              <div *cdkDragPlaceholder class="h-full min-h-[120px] rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
             </div>
 
             @for (clip of board.clips ?? []; track clip.id) {
-              <div class="min-w-0 flex flex-col gap-1.5">
+              @let clipTile = clipDragData(board, clip);
+              <div
+                cdkDrag
+                [cdkDragData]="clipTile"
+                [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+                (cdkDragStarted)="onTileDragStarted(clipTile)"
+                (cdkDragMoved)="onTileDragMoved($event)"
+                (cdkDragEnded)="onTileDragEnded(clipTile, $event)"
+                class="min-w-0 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing">
                 <div class="overflow-hidden rounded-2xl bg-black aspect-[9/16] shadow-card dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
                   <video
                     appAutoplayVideo
@@ -147,6 +171,14 @@
                     {{ formatRange(clip.start_ms, clip.end_ms) }}
                   </p>
                 </div>
+                <div *cdkDragPreview class="flex max-w-[260px] items-center gap-2 rounded-xl border border-blue-500/60 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 shadow-2xl">
+                  <span class="flex h-10 w-7 shrink-0 items-center justify-center rounded bg-black text-white"><span class="material-icons-outlined !text-base">play_arrow</span></span>
+                  <span class="min-w-0">
+                    <span class="block font-semibold">Add Clip {{ clip.position }}</span>
+                    <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
+                  </span>
+                </div>
+                <div *cdkDragPlaceholder class="h-full min-h-[120px] rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
               </div>
             }
           </div>

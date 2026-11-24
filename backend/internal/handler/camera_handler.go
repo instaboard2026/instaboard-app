@@ -223,6 +223,10 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	kind := q.Get("kind")
+	sort := q.Get("sort")
+	if sort != repository.CameraSortOldest {
+		sort = repository.CameraSortLatest
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
 		limit = 24
@@ -259,7 +263,7 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 
 	var rows []repository.CameraIndexRow
 	if useOffset {
-		rows, err = h.index.ListOffset(r.Context(), userID, kind, offset, limit)
+		rows, err = h.index.ListOffset(r.Context(), userID, kind, offset, limit, sort)
 	} else {
 		rows, err = h.index.ListPage(r.Context(), userID, kind, cursor, limit)
 	}

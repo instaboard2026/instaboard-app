@@ -115,28 +115,51 @@
     }
 
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div
-        class="flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5 w-fit"
-        role="group"
-        aria-label="Filter by media type">
-        @for (f of mediaFilters; track f.id) {
-          <button
-            type="button"
-            (click)="setMediaFilter(f.id)"
-            [attr.aria-pressed]="mediaFilter() === f.id"
-            [attr.aria-label]="f.label"
-            [title]="f.label + ' · ' + mediaFilterCounts()[f.id]"
-            class="inline-flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors"
-            [class.bg-white]="mediaFilter() === f.id"
-            [class.dark:bg-slate-700]="mediaFilter() === f.id"
-            [class.shadow-sm]="mediaFilter() === f.id"
-            [class.text-ink]="mediaFilter() === f.id"
-            [class.dark:text-white]="mediaFilter() === f.id"
-            [class.text-ink-secondary]="mediaFilter() !== f.id"
-            [class.dark:text-slate-400]="mediaFilter() !== f.id">
-            <span class="material-icons-outlined !text-[20px]">{{ f.icon }}</span>
-          </button>
-        }
+      <div class="flex flex-wrap items-center gap-2">
+        <div
+          class="flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5 w-fit"
+          role="group"
+          aria-label="Filter by media type">
+          @for (f of mediaFilters; track f.id) {
+            <button
+              type="button"
+              (click)="setMediaFilter(f.id)"
+              [attr.aria-pressed]="mediaFilter() === f.id"
+              [attr.aria-label]="f.label"
+              [title]="f.label + ' · ' + mediaFilterCounts()[f.id]"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors"
+              [class.bg-white]="mediaFilter() === f.id"
+              [class.dark:bg-slate-700]="mediaFilter() === f.id"
+              [class.shadow-sm]="mediaFilter() === f.id"
+              [class.text-ink]="mediaFilter() === f.id"
+              [class.dark:text-white]="mediaFilter() === f.id"
+              [class.text-ink-secondary]="mediaFilter() !== f.id"
+              [class.dark:text-slate-400]="mediaFilter() !== f.id">
+              <span class="material-icons-outlined !text-[20px]">{{ f.icon }}</span>
+            </button>
+          }
+        </div>
+        <div
+          class="flex items-center gap-0.5 rounded-xl bg-[#f1f1f1] dark:bg-slate-800 p-0.5 w-fit"
+          role="group"
+          aria-label="Sort by date">
+          @for (s of sortFilters; track s.id) {
+            <button
+              type="button"
+              (click)="setSortOrder(s.id)"
+              [attr.aria-pressed]="sortOrder() === s.id"
+              class="h-8 px-3 rounded-[10px] text-sm font-medium transition-colors"
+              [class.bg-white]="sortOrder() === s.id"
+              [class.dark:bg-slate-700]="sortOrder() === s.id"
+              [class.shadow-sm]="sortOrder() === s.id"
+              [class.text-ink]="sortOrder() === s.id"
+              [class.dark:text-white]="sortOrder() === s.id"
+              [class.text-ink-secondary]="sortOrder() !== s.id"
+              [class.dark:text-slate-400]="sortOrder() !== s.id">
+              {{ s.label }}
+            </button>
+          }
+        </div>
       </div>
 
       <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -233,9 +256,18 @@
       }
       <button
         type="button"
+        (click)="shareSelected()"
+        [disabled]="selectedCount() === 0 || sharing() || deleting() || loading() || scanning()"
+        title="Share selected files (AirDrop via Safari system share sheet)"
+        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
+        <span class="material-icons-outlined !text-lg">ios_share</span>
+        {{ sharing() ? 'Sharing…' : 'Share' }}
+      </button>
+      <button
+        type="button"
         (click)="deleteSelected()"
-        [disabled]="selectedCount() === 0 || deleting() || loading() || scanning()"
-        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
+        [disabled]="selectedCount() === 0 || deleting() || sharing() || loading() || scanning()"
+        class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
         <span class="material-icons-outlined !text-lg">delete</span>
         Delete
       </button>

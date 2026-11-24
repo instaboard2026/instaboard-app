@@ -7,30 +7,43 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview } from '@angular/cdk/drag-drop';
 import { RouterLink } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { AutoplayVideoDirective } from '../../shared/directives/autoplay-video.directive';
 import { CacheService } from '../../services/cache.service';
-import { CardDragService, isSplitDrop } from '../../services/card-drag.service';
-import { DumpService, Save } from '../../services/dump.service';
-import { SplitProject, SplitService } from '../../services/split.service';
+import {
+  CardDragService,
+  SplitExportDrag,
+  isCalendarDrop,
+  isLocalMediaDrop,
+  isSplitDrop,
+} from '../../services/card-drag.service';
+import { DumpService, MoveTarget, Save } from '../../services/dump.service';
+import { FoldersService } from '../../services/folders.service';
+import { PlaybackService } from '../../services/playback.service';
+import { SplitClip, SplitProject, SplitService } from '../../services/split.service';
 import { UserContextService } from '../../services/user-context.service';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
 type PerRow = (typeof PER_ROW_OPTIONS)[number];
 
+type SplitTileDrag = SplitExportDrag & { label: string };
+
 @Component({
   selector: 'app-split-page',
   standalone: true,
-  imports: [RouterLink, AutoplayVideoDirective],
+  imports: [RouterLink, AutoplayVideoDirective, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './split-page.component.html',
 })
 export class SplitPageComponent {
   private split = inject(SplitService);
   private dump = inject(DumpService);
+  private folders = inject(FoldersService);
+  private playback = inject(PlaybackService);
   private user = inject(UserContextService);
   private cacheService = inject(CacheService);
   readonly cardDrag = inject(CardDragService);
@@ -112,7 +125,7 @@ export class SplitPageComponent {
     this.dropping.set(false);
     if (!this.isLoggedIn()) return;
 
-    if (this.cardDrag.dragging()) return;
+    if (this.cardDrag.dragging() || this.cardDrag.splitExport()) return;
 
     const files = event.dataTransfer?.files;
     if (!files?.length) return;
@@ -249,6 +262,54 @@ export class SplitPageComponent {
 
   isSplitDropHover(): boolean {
     return isSplitDrop(this.cardDrag.hoverTarget());
+  }
+
+  masterDragData(board: SplitProject): SplitTileDrag {
+    return { projectId: board.id, clipId: null, label: 'Master' };
+  }
+
+  clipDragData(board: SplitProject, clip: SplitClip): SplitTileDrag {
+    return { projectId: board.id, clipId: clip.id, label: `Clip ${clip.position}` };
+  }
+
+  onTileDragStarted(tile: SplitTileDrag): void {
+    this.cardDrag.splitExport.set({ projectId: tile.projectId, clipId: tile.clipId });
+    this.playback.dragPause.set(true);
+  }
+
+  onTileDragMoved(event: CdkDragMove<SplitTileDrag>): void {
+    this.cardDrag.hoverTarget.set(this.resolveFolderDropTarget(event.pointerPosition.x, event.pointerPosition.y));
+  }
+
+  onTileDragEnded(tile: SplitTileDrag, event: CdkDragEnd<SplitTileDrag>): void {
+    const target =
+      this.resolveFolderDropTarget(event.dropPoint.x, event.dropPoint.y) ?? this.cardDrag.hoverTarget();
+    this.cardDrag.splitExport.set(null);
+    this.cardDrag.hoverTarget.set(null);
+    this.playback.dragPause.set(false);
+
+    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target) || isLocalMediaDrop(target)) {
+      return;
+    }
+    const scope = target as MoveTarget;
+    this.dump.createFromSplit(tile.projectId, tile.clipId, scope).subscribe({
+      next: () => {
+        this.folders.noteAddedSaves(scope, 1);
+        this.folders.showNotice(
+          scope === 'dump' ? `Added ${tile.label} to Home` : `Added ${tile.label} to folder`,
+        );
+      },
+      error: (err: Error) => this.folders.showNotice(err.message),
+    });
+  }
+
+  /** Home/folder only — Bin, calendar, Split, and Local media are not export targets. */
+  private resolveFolderDropTarget(x: number, y: number) {
+    const target = this.cardDrag.targetAt(x, y);
+    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target) || isLocalMediaDrop(target)) {
+      return null;
+    }
+    return target;
   }
 
   private hydrateBoards(list: SplitProject[]): void {

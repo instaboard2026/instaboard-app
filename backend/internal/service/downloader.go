@@ -195,6 +195,44 @@ func (d *Downloader) AdoptLocalFile(dir string, id uint64, srcPath string) (*Dow
 	return &DownloadState{Kind: kind, Files: 1}, nil
 }
 
+// CopyLocalFile copies an on-disk file into the download folder for save id without removing the source.
+// Layout matches AdoptLocalFile (.mp4 video → <id>.mp4; otherwise <id>/1.<ext>).
+func (d *Downloader) CopyLocalFile(dir string, id uint64, srcPath string) (*DownloadState, error) {
+	fi, err := os.Stat(srcPath)
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("source file missing")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create download folder: %w", err)
+	}
+	_ = d.RemoveFiles(dir, id)
+
+	ext := strings.ToLower(filepath.Ext(srcPath))
+	name := strconv.FormatUint(id, 10)
+	var dest string
+	var kind string
+	if MediaType(srcPath) == "video" && ext == ".mp4" {
+		dest = filepath.Join(dir, name+".mp4")
+		kind = DownloadKindVideo
+	} else {
+		if ext == "" || strings.ContainsAny(ext, `/\`) {
+			return nil, fmt.Errorf("invalid file extension")
+		}
+		postDir := filepath.Join(dir, name)
+		if err := os.MkdirAll(postDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create save folder: %w", err)
+		}
+		dest = filepath.Join(postDir, "1"+ext)
+		kind = DownloadKindPost
+	}
+
+	if err := copyFile(srcPath, dest); err != nil {
+		_ = d.RemoveFiles(dir, id)
+		return nil, err
+	}
+	return &DownloadState{Kind: kind, Files: 1}, nil
+}
+
 func moveFile(src, dest string) error {
 	if err := os.Rename(src, dest); err == nil {
 		return nil
@@ -421,12 +459,12 @@ func engagementFromMediaInfoJSON(raw []byte) *EngagementCounts {
 		return nil
 	}
 	var item struct {
-		LikeCount         *int64 `json:"like_count"`
-		CommentCount      *int64 `json:"comment_count"`
-		MediaRepostCount  *int64 `json:"media_repost_count"`
-		ReshareCount      *int64 `json:"reshare_count"`
-		PlayCount         *int64 `json:"play_count"`
-		IGPlayCount       *int64 `json:"ig_play_count"`
+		LikeCount        *int64 `json:"like_count"`
+		CommentCount     *int64 `json:"comment_count"`
+		MediaRepostCount *int64 `json:"media_repost_count"`
+		ReshareCount     *int64 `json:"reshare_count"`
+		PlayCount        *int64 `json:"play_count"`
+		IGPlayCount      *int64 `json:"ig_play_count"`
 	}
 	if err := json.Unmarshal(payload.Items[0], &item); err != nil {
 		return nil

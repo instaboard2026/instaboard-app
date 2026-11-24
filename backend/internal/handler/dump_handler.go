@@ -51,6 +51,8 @@ type DumpHandler struct {
 	downloader     *service.Downloader
 	media          *service.MediaSigner
 	local          *repository.LocalMediaRepo
+	splitRepo      *repository.SplitRepo
+	splitter       *service.SplitService
 	defaultDir     string
 	cookiesBrowser string
 }
@@ -62,10 +64,13 @@ func NewDumpHandler(
 	downloader *service.Downloader,
 	media *service.MediaSigner,
 	local *repository.LocalMediaRepo,
+	splitRepo *repository.SplitRepo,
+	splitter *service.SplitService,
 	defaultDir, cookiesBrowser string,
 ) *DumpHandler {
 	return &DumpHandler{
 		repo: repo, settings: settings, downloader: downloader, media: media, local: local,
+		splitRepo: splitRepo, splitter: splitter,
 		defaultDir: defaultDir, cookiesBrowser: cookiesBrowser,
 	}
 }
@@ -402,6 +407,110 @@ func (h *DumpHandler) PromoteFromLocalMedia(w http.ResponseWriter, r *http.Reque
 	}
 
 	utils.WriteJSON(w, http.StatusCreated, utils.APIResponse{Status: "SUCCESS", Data: out})
+}
+
+// CreateFromSplit copies a Split master or clip into Home or a Dump folder as a local save card.
+// The split project and its files are left unchanged.
+func (h *DumpHandler) CreateFromSplit(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	if h.splitRepo == nil || h.splitter == nil {
+		utils.WriteError(w, http.StatusInternalServerError, "split unavailable", nil)
+		return
+	}
+	var body struct {
+		ProjectID uint64  `json:"project_id"`
+		ClipID    *uint64 `json:"clip_id"`
+		FolderID  *int64  `json:"folder_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ProjectID == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "project_id required", nil)
+		return
+	}
+	if body.FolderID != nil && *body.FolderID <= 0 {
+		utils.WriteError(w, http.StatusBadRequest, "invalid folder id", nil)
+		return
+	}
+	if body.ClipID != nil && *body.ClipID == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "invalid clip id", nil)
+		return
+	}
+
+	if _, err := h.splitRepo.GetProject(r.Context(), userID, body.ProjectID); errors.Is(err, repository.ErrSplitProjectNotFound) {
+		utils.WriteError(w, http.StatusNotFound, "split project not found", nil)
+		return
+	} else if err != nil {
+		slog.Error("get split project for export failed", "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "could not export clip", nil)
+		return
+	}
+
+	dir, _ := h.downloadDir(r, userID)
+	var src string
+	if body.ClipID == nil {
+		src = h.splitter.MasterPath(dir, userID, body.ProjectID)
+	} else {
+		clips, err := h.splitRepo.ListClips(r.Context(), body.ProjectID)
+		if err != nil {
+			slog.Error("list split clips for export failed", "err", err)
+			utils.WriteError(w, http.StatusInternalServerError, "could not export clip", nil)
+			return
+		}
+		var fileName string
+		for _, c := range clips {
+			if c.ID == *body.ClipID {
+				fileName = c.FileName
+				break
+			}
+		}
+		if fileName == "" {
+			utils.WriteError(w, http.StatusNotFound, "split clip not found", nil)
+			return
+		}
+		src = h.splitter.ClipPath(dir, userID, body.ProjectID, fileName)
+		if src == "" {
+			utils.WriteError(w, http.StatusBadRequest, "invalid split clip file", nil)
+			return
+		}
+	}
+	if fi, err := os.Stat(src); err != nil || !fi.Mode().IsRegular() {
+		utils.WriteError(w, http.StatusNotFound, "split media file not found", nil)
+		return
+	}
+
+	url, err := newLocalURL()
+	if err != nil {
+		slog.Error("local url failed", "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
+		return
+	}
+	save, err := h.repo.Insert(r.Context(), userID, url, service.SourceLocal, "split", body.FolderID)
+	switch {
+	case errors.Is(err, repository.ErrFolderNotFound):
+		utils.WriteError(w, http.StatusNotFound, "folder not found", nil)
+		return
+	case err != nil:
+		slog.Error("insert split export save failed", "err", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
+		return
+	}
+
+	state, storeErr := h.downloader.CopyLocalFile(dir, save.ID, src)
+	if storeErr != nil {
+		h.removeDownloadFiles(r, userID, save.ID)
+		_ = h.repo.Delete(r.Context(), userID, save.ID)
+		slog.Error("copy split media failed", "project", body.ProjectID, "err", storeErr)
+		utils.WriteError(w, http.StatusInternalServerError, "could not copy file into folder", nil)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusCreated, utils.APIResponse{
+		Status: "SUCCESS",
+		Data:   saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)},
+	})
 }
 
 // RevealInFinder opens the downloaded file for this save in Finder (macOS) or the file manager.
