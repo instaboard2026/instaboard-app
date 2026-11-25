@@ -8,7 +8,8 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Subscription, takeWhile } from 'rxjs';
+import { Subscription, firstValueFrom, takeWhile } from 'rxjs';
+import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import {
   CameraItem,
   CameraKindFilter,
@@ -16,13 +17,15 @@ import {
   CameraSortOrder,
 } from '../../services/camera.service';
 import { CameraDragService } from '../../services/camera-drag.service';
-import { LocalMediaService } from '../../services/local-media.service';
+import { CameraCopyService } from '../../services/camera-copy.service';
+import { FoldersService } from '../../services/folders.service';
+import { MoveTarget } from '../../services/dump.service';
 import { CacheService } from '../../services/cache.service';
 import { UserContextService } from '../../services/user-context.service';
 import { LazyThumbDirective } from '../../shared/directives/lazy-thumb.directive';
+import { MediaMemoryCacheService } from '../../services/media-memory-cache.service';
 import { LazyAutoplayVideoDirective } from '../../shared/directives/lazy-autoplay-video.directive';
 import { PlaybackService } from '../../services/playback.service';
-import { shareFilesFromUrls, shareFilesNotice } from '../../shared/utils/share-files';
 
 const PER_ROW_KEY = 'dump_per_row';
 const PER_ROW_OPTIONS = [4, 6, 8, 12] as const;
@@ -52,13 +55,14 @@ const SORT_FILTERS: readonly { id: CameraSortOrder; label: string }[] = [
 @Component({
   selector: 'app-camera-page',
   standalone: true,
-  imports: [LazyThumbDirective, LazyAutoplayVideoDirective],
+  imports: [LazyThumbDirective, LazyAutoplayVideoDirective, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './camera-page.component.html',
 })
 export class CameraPageComponent implements OnDestroy {
   private camera = inject(CameraService);
-  private localMedia = inject(LocalMediaService);
+  private cameraCopy = inject(CameraCopyService);
+  private foldersService = inject(FoldersService);
   private user = inject(UserContextService);
   private cacheService = inject(CacheService);
   readonly cameraDrag = inject(CameraDragService);
@@ -82,7 +86,6 @@ export class CameraPageComponent implements OnDestroy {
   readonly pageIndex = this.camera.pageIndex;
   readonly pageCount = this.camera.pageCount;
   readonly total = this.camera.total;
-  readonly folders = this.localMedia.folders;
   readonly isLoggedIn = computed(() => this.user.isLoggedIn());
 
   readonly selectMode = signal(false);
@@ -92,10 +95,21 @@ export class CameraPageComponent implements OnDestroy {
   readonly opening = signal(false);
   readonly deleting = signal(false);
   readonly sharing = signal(false);
-  readonly copying = this.localMedia.copying;
-  readonly activeCopy = this.localMedia.activeCopy;
-  readonly copyPercent = this.localMedia.copyPercent;
+  readonly copying = this.cameraCopy.copying;
+  readonly activeCopy = this.cameraCopy.activeCopy;
+  readonly copyPercent = this.cameraCopy.copyPercent;
   readonly thumbFailed = signal<Set<string>>(new Set());
+  private mediaCache = inject(MediaMemoryCacheService);
+  /** "0:42" / "1:05:09" for a video tile, or null while unknown. */
+  durationLabel(item: CameraItem): string | null {
+    const ms = item.duration_ms || this.mediaCache.durationMs(item.thumb_url);
+    if (!ms || ms <= 0) return null;
+    const total = Math.round(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+  }
   /** Full-screen / modal preview for one camera video (or image). */
   readonly preview = signal<CameraItem | null>(null);
 
@@ -112,11 +126,8 @@ export class CameraPageComponent implements OnDestroy {
   readonly count = computed(() => this.status()?.all_count ?? this.total());
   readonly indexedCount = computed(() => this.status()?.indexed_count ?? this.total());
   readonly displayPage = computed(() => this.pageIndex() + 1);
-  /** Videos clamp to 24 so a large "per page" choice cannot mount a wall of decoders. */
-  readonly pageSize = computed(() => {
-    const n = this.pageSizeChoice();
-    return this.mediaFilter() === 'video' ? Math.min(n, 24) : n;
-  });
+  /** What the user picked. Autoplay itself caps how many videos decode at once. */
+  readonly pageSize = computed(() => this.pageSizeChoice());
   readonly canPrev = computed(() => this.pageIndex() > 0);
   readonly canNext = computed(() => this.pageIndex() + 1 < this.pageCount());
 
@@ -137,7 +148,6 @@ export class CameraPageComponent implements OnDestroy {
     const s = this.status();
     return !!s?.has_root && !s.available;
   });
-  readonly noFolders = computed(() => this.folders().length === 0);
   readonly folderStorageLabel = computed(() => {
     const s = this.status();
     if (!s?.has_root || !s.available) return null;
@@ -173,7 +183,6 @@ export class CameraPageComponent implements OnDestroy {
     effect(() => this.cacheService.setItem(SORT_KEY, this.sortOrder()));
 
     if (this.user.isLoggedIn()) {
-      if (!this.localMedia.loaded()) this.localMedia.loadFolders();
       this.camera.loadStatus().subscribe({
         next: (s) => {
           if (s.available || s.has_root) {
@@ -192,6 +201,7 @@ export class CameraPageComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.scanSub?.unsubscribe();
+    this.playback.previewPause.set(false);
   }
 
   setPerRow(n: PerRow): void {
@@ -297,10 +307,12 @@ export class CameraPageComponent implements OnDestroy {
     event?.stopPropagation();
     event?.preventDefault();
     if (item.kind === 'junk') return;
+    this.playback.previewPause.set(item.kind === 'video');
     this.preview.set(item);
   }
 
   closePreview(): void {
+    this.playback.previewPause.set(false);
     this.preview.set(null);
   }
 
@@ -356,17 +368,11 @@ export class CameraPageComponent implements OnDestroy {
     }
 
     this.sharing.set(true);
-    this.notice.set(`Preparing ${items.length} file${items.length === 1 ? '' : 's'}…`);
+    this.notice.set(null);
     try {
-      const result = await shareFilesFromUrls(
-        items.map((it) => ({ name: it.name, url: it.url, byteSize: it.byte_size || 0 })),
-        {
-          onProgress: (current, total) => {
-            this.notice.set(`Preparing ${current} of ${total}…`);
-          },
-        },
-      );
-      this.notice.set(shareFilesNotice(result));
+      await firstValueFrom(this.camera.airDrop(items.map((it) => it.rel_path)));
+    } catch (err) {
+      this.notice.set(err instanceof Error ? err.message : 'Could not open AirDrop.');
     } finally {
       this.sharing.set(false);
     }
@@ -420,44 +426,47 @@ export class CameraPageComponent implements OnDestroy {
     this.thumbFailed.update((s) => new Set(s).add(rel));
   }
 
-  onDragStart(event: DragEvent, item: CameraItem): void {
+  /** Files being dragged (the tile, or the whole selection when the tile is part of it). */
+  readonly dragPaths = signal<string[]>([]);
+
+  /** Same drag as folder cards: small chip follows the pointer, videos pause, sidebar highlights. */
+  onTileDragStarted(item: CameraItem): void {
     let paths = [...this.selected()];
     if (!paths.includes(item.rel_path)) {
       paths = [item.rel_path];
       this.selected.set(new Set(paths));
     }
+    this.dragPaths.set(paths);
     this.cameraDrag.dragging.set({ kind: 'camera', paths });
-    event.dataTransfer?.setData('application/x-instaboard-camera', JSON.stringify(paths));
-    event.dataTransfer!.effectAllowed = 'copy';
+    this.playback.dragPause.set(true);
   }
 
-  @HostListener('document:dragover', ['$event'])
-  onDocDragOver(event: DragEvent): void {
-    if (this.cameraDrag.dragging()?.kind !== 'camera') return;
-    event.preventDefault();
-    this.cameraDrag.hoverFolderId.set(this.cameraDrag.targetFolderAt(event.clientX, event.clientY));
+  onTileDragMoved(event: CdkDragMove<CameraItem>): void {
+    this.cameraDrag.hoverTarget.set(this.cameraDrag.targetAt(event.pointerPosition.x, event.pointerPosition.y));
   }
 
-  @HostListener('document:drop', ['$event'])
-  onDocDrop(event: DragEvent): void {
-    const drag = this.cameraDrag.dragging();
-    if (drag?.kind !== 'camera' || !drag.paths.length) return;
-    event.preventDefault();
-    const folderId = this.cameraDrag.targetFolderAt(event.clientX, event.clientY);
+  /** Dropped on Home or a folder: copy the files in. Anywhere else: the tile glides back. */
+  onTileDragEnded(event: CdkDragEnd<CameraItem>): void {
+    const target = this.cameraDrag.targetAt(event.dropPoint.x, event.dropPoint.y) ?? this.cameraDrag.hoverTarget();
+    const paths = this.dragPaths();
     this.cameraDrag.clear();
-    if (folderId == null) return;
-    this.copyToFolder(folderId, drag.paths);
+    this.playback.dragPause.set(false);
+    this.dragPaths.set([]);
+    if (target != null && paths.length) this.copyToFolder(target, paths);
   }
 
-  @HostListener('document:dragend')
-  onDocDragEnd(): void {
-    this.cameraDrag.clear();
+  /** Thumbnail already in memory for the drag chip (no extra card reads). */
+  dragChipThumb(item: CameraItem): string | null {
+    return item.thumb_url ? this.mediaCache.peek(item.thumb_url) : null;
   }
 
-  copySelectedTo(folderId: number): void {
-    const paths = [...this.selected()];
-    if (!paths.length) return;
-    this.copyToFolder(folderId, paths);
+  /** "Copy 1 video" / "Copy 3 files" for the drag chip. */
+  dragChipLabel(): string {
+    const paths = new Set(this.dragPaths());
+    const n = paths.size;
+    const kinds = new Set(this.items().filter((i) => paths.has(i.rel_path)).map((i) => i.kind));
+    const noun = kinds.size === 1 && kinds.has('video') ? 'video' : kinds.size === 1 && kinds.has('image') ? 'photo' : 'file';
+    return `Copy ${n} ${noun}${n === 1 ? '' : 's'}`;
   }
 
   formatCopyBytes(bytes: number): string {
@@ -468,21 +477,20 @@ export class CameraPageComponent implements OnDestroy {
     return this.camera.loadPage(pageIndex, this.mediaFilter(), this.pageSize(), this.sortOrder());
   }
 
-  private copyToFolder(folderId: number, paths: string[]): void {
+  /** Copies camera files into Home or a folder as cards (the card itself is left untouched). */
+  private copyToFolder(target: MoveTarget, paths: string[]): void {
     if (this.copying()) return;
-    if (this.noFolders()) {
-      this.notice.set('Create a Local media folder in the sidebar first.');
-      return;
-    }
     this.notice.set(null);
-    this.localMedia.runCopyJob(folderId, paths).subscribe({
-      next: () => {
-        if (this.localMedia.notice()) this.notice.set(this.localMedia.notice());
+    const name = target === 'dump' ? 'Home' : (this.foldersService.byId().get(target)?.name ?? 'folder');
+    this.cameraCopy.copy(target, paths).subscribe({
+      next: (job) => {
+        this.notice.set(this.cameraCopy.summary(job, name));
         this.selected.set(new Set());
       },
       error: (err: Error) => this.notice.set(err.message),
     });
   }
+
 
   private startScanPoll(): void {
     this.scanSub?.unsubscribe();

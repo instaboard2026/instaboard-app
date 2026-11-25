@@ -22,7 +22,7 @@ import (
 // CameraHandler serves Manage camera (browse SD / folder, signed previews).
 type CameraHandler struct {
 	settings   *repository.SettingsRepo
-	local      *repository.LocalMediaRepo
+	copies     *repository.CameraCopyRepo
 	index      *repository.CameraIndexRepo
 	scanner    *service.CameraScanner
 	media      *service.MediaSigner
@@ -32,14 +32,14 @@ type CameraHandler struct {
 // NewCameraHandler creates a CameraHandler.
 func NewCameraHandler(
 	settings *repository.SettingsRepo,
-	local *repository.LocalMediaRepo,
+	copies *repository.CameraCopyRepo,
 	index *repository.CameraIndexRepo,
 	scanner *service.CameraScanner,
 	media *service.MediaSigner,
 	defaultDir string,
 ) *CameraHandler {
 	return &CameraHandler{
-		settings: settings, local: local, index: index,
+		settings: settings, copies: copies, index: index,
 		scanner: scanner, media: media, defaultDir: defaultDir,
 	}
 }
@@ -83,6 +83,8 @@ type cameraItemJSON struct {
 	URL      string `json:"url"`
 	ThumbURL string `json:"thumb_url"`
 	Copied   bool   `json:"copied"`
+	// DurationMs is the video length once its thumbnail has been made (0 = not known yet).
+	DurationMs int64 `json:"duration_ms,omitempty"`
 }
 
 type cameraItemsPageJSON struct {
@@ -272,13 +274,14 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusInternalServerError, "could not load camera items", nil)
 		return
 	}
-	copied, err := h.local.CopiedBasenames(r.Context(), userID)
+	copied, err := h.copies.Names(r.Context(), userID)
 	if err != nil {
 		slog.Error("copied basenames failed", "err", err)
 		utils.WriteError(w, http.StatusInternalServerError, "could not load Local media", nil)
 		return
 	}
 
+	dir := h.downloadDir(r, userID)
 	items := make([]cameraItemJSON, 0, len(rows))
 	for _, row := range rows {
 		full := ""
@@ -288,14 +291,15 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 			thumb = h.media.CameraThumbURL(userID, row.RelPath)
 		}
 		items = append(items, cameraItemJSON{
-			RelPath:  row.RelPath,
-			Name:     row.Name,
-			Kind:     row.Kind,
-			ByteSize: row.ByteSize,
-			MtimeNs:  row.MtimeNs,
-			URL:      full,
-			ThumbURL: thumb,
-			Copied:   copied[row.Name],
+			RelPath:    row.RelPath,
+			Name:       row.Name,
+			Kind:       row.Kind,
+			ByteSize:   row.ByteSize,
+			MtimeNs:    row.MtimeNs,
+			URL:        full,
+			ThumbURL:   thumb,
+			Copied:     copied[row.Name],
+			DurationMs: service.CameraVideoDurationMs(dir, userID, "", row.RelPath, row.ByteSize, row.MtimeNs, false),
 		})
 	}
 	next := ""
@@ -392,6 +396,60 @@ func (h *CameraHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	utils.WriteSuccess(w, cameraDeleteResultJSON{Deleted: len(okPaths), Failed: failed})
 }
 
+// AirDrop opens the Mac's AirDrop window for selected files on the camera card, read in place.
+func (h *CameraHandler) AirDrop(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	cr, err := h.settings.GetCameraRoot(r.Context(), userID)
+	if err != nil || !cr.HasRoot {
+		utils.WriteError(w, http.StatusNotFound, "no camera folder chosen yet", nil)
+		return
+	}
+	if !service.CameraRootAvailable(cr.Root) {
+		utils.WriteError(w, http.StatusFailedDependency, "camera folder is not available — reconnect the card", nil)
+		return
+	}
+	var body cameraDeleteBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || len(body.RelPaths) == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "rel_paths required", nil)
+		return
+	}
+	if len(body.RelPaths) > 500 {
+		utils.WriteError(w, http.StatusBadRequest, "at most 500 files per share", nil)
+		return
+	}
+	paths := make([]string, 0, len(body.RelPaths))
+	for _, rel := range body.RelPaths {
+		path, err := service.ResolveUnderRoot(cr.Root, filepath.ToSlash(strings.TrimSpace(rel)))
+		if err != nil {
+			continue
+		}
+		if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
+			paths = append(paths, path)
+		}
+	}
+	writeAirDrop(w, paths)
+}
+
+func writeAirDrop(w http.ResponseWriter, paths []string) {
+	if len(paths) == 0 {
+		utils.WriteError(w, http.StatusNotFound, "selected files are missing on disk", nil)
+		return
+	}
+	if err := service.OpenAirDrop(paths); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrAirDropUnavailable) {
+			status = http.StatusFailedDependency
+		}
+		utils.WriteError(w, status, err.Error(), nil)
+		return
+	}
+	utils.WriteSuccess(w, map[string]int{"files": len(paths)})
+}
+
 // ClearRoot forgets the saved camera path and index.
 func (h *CameraHandler) ClearRoot(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
@@ -471,6 +529,9 @@ func (h *CameraHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "thumbnail unavailable", http.StatusNotFound)
 		return
+	}
+	if ms := service.CameraVideoDurationMs(dir, userID, src, file, fi.Size(), fi.ModTime().UnixNano(), true); ms > 0 {
+		w.Header().Set("X-Duration-Ms", strconv.FormatInt(ms, 10))
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")

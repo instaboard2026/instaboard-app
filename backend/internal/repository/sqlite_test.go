@@ -132,7 +132,7 @@ func TestSaveReorder(t *testing.T) {
 	folders := NewFolderRepo(db)
 	saves := NewSaveRepo(db)
 	u := createUser(t, db, "ord@example.com")
-	folder, _ := folders.Create(ctx, u.ID, "Looks")
+	folder, _ := folders.Create(ctx, u.ID, "Looks", nil)
 
 	a, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/a", "instagram", "web", &folder.ID)
 	b, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/b", "instagram", "web", &folder.ID)

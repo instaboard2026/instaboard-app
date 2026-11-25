@@ -78,6 +78,7 @@ export class LazyAutoplayVideoDirective implements OnDestroy {
       this.appLazyAutoplayVideo();
       this.playback.autoplay();
       this.playback.dragPause();
+      this.playback.previewPause();
       this.sync();
     });
   }
@@ -94,7 +95,8 @@ export class LazyAutoplayVideoDirective implements OnDestroy {
       !!url &&
       this.visible &&
       this.playback.autoplay() &&
-      !this.playback.dragPause();
+      !this.playback.dragPause() &&
+      !this.playback.previewPause();
 
     if (!want) {
       this.teardown();

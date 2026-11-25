@@ -56,7 +56,7 @@ func isUniqueViolation(err error) bool {
 // List returns the user's folders in sidebar order, each with its number of saves.
 func (r *FolderRepo) List(ctx context.Context, userID int64) ([]models.Folder, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT f.id, f.name, f.position, COUNT(s.id)
+		`SELECT f.id, f.name, f.position, COUNT(s.id), f.section_id
 		 FROM tbl_folders f
 		 LEFT JOIN tbl_saves s ON s.folder_id = f.id AND s.deleted_at IS NULL
 		 WHERE f.user_id = ?
@@ -72,7 +72,7 @@ func (r *FolderRepo) List(ctx context.Context, userID int64) ([]models.Folder, e
 	folders := []models.Folder{}
 	for rows.Next() {
 		var f models.Folder
-		if err := rows.Scan(&f.ID, &f.Name, &f.Position, &f.Count); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Position, &f.Count, &f.SectionID); err != nil {
 			return nil, err
 		}
 		folders = append(folders, f)
@@ -84,10 +84,10 @@ func (r *FolderRepo) List(ctx context.Context, userID int64) ([]models.Folder, e
 func (r *FolderRepo) Get(ctx context.Context, userID, id int64) (*models.Folder, error) {
 	var f models.Folder
 	err := r.db.QueryRowContext(ctx,
-		`SELECT f.id, f.name, f.position, (SELECT COUNT(*) FROM tbl_saves s WHERE s.folder_id = f.id AND s.deleted_at IS NULL)
+		`SELECT f.id, f.name, f.position, (SELECT COUNT(*) FROM tbl_saves s WHERE s.folder_id = f.id AND s.deleted_at IS NULL), f.section_id
 		 FROM tbl_folders f WHERE f.id = ? AND f.user_id = ?`,
 		id, userID,
-	).Scan(&f.ID, &f.Name, &f.Position, &f.Count)
+	).Scan(&f.ID, &f.Name, &f.Position, &f.Count, &f.SectionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrFolderNotFound
 	}
@@ -98,7 +98,7 @@ func (r *FolderRepo) Get(ctx context.Context, userID, id int64) (*models.Folder,
 }
 
 // Create adds a folder at the end of the user's list. An empty name becomes the lowest free "Folder N".
-func (r *FolderRepo) Create(ctx context.Context, userID int64, name string) (*models.Folder, error) {
+func (r *FolderRepo) Create(ctx context.Context, userID int64, name string, sectionID *int64) (*models.Folder, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -114,6 +114,17 @@ func (r *FolderRepo) Create(ctx context.Context, userID int64, name string) (*mo
 	if count >= MaxFolders {
 		return nil, ErrTooManyFolders
 	}
+	if sectionID != nil {
+		var n int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM tbl_folder_sections WHERE id = ? AND user_id = ?`, *sectionID, userID,
+		).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			return nil, ErrSectionNotFound
+		}
+	}
 
 	if strings.TrimSpace(name) == "" {
 		name, err = nextDefaultName(ctx, tx, userID)
@@ -125,7 +136,7 @@ func (r *FolderRepo) Create(ctx context.Context, userID int64, name string) (*mo
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO tbl_folders (user_id, name, position) VALUES (?, ?, ?)`, userID, name, maxPos+1,
+		`INSERT INTO tbl_folders (user_id, name, position, section_id) VALUES (?, ?, ?, ?)`, userID, name, maxPos+1, sectionID,
 	)
 	if isUniqueViolation(err) {
 		return nil, ErrFolderNameTaken
@@ -140,7 +151,7 @@ func (r *FolderRepo) Create(ctx context.Context, userID int64, name string) (*mo
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &models.Folder{ID: id, Name: name, Position: maxPos + 1}, nil
+	return &models.Folder{ID: id, Name: name, Position: maxPos + 1, SectionID: sectionID}, nil
 }
 
 // nextDefaultName returns the lowest "Folder N" (N >= 1) the user doesn't have yet.

@@ -108,11 +108,6 @@
       </p>
     }
 
-    @if (noFolders()) {
-      <p class="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
-        Create a Local media folder in the sidebar before copying.
-      </p>
-    }
 
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
@@ -202,7 +197,7 @@
                 title="Items per page"
                 class="box-border h-8 w-[4.75rem] rounded-[10px] border border-[#d0d0d0] bg-white py-0 pl-2 pr-1 text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 disabled:opacity-40">
                 @for (n of pageSizeOptions; track n) {
-                  <option [value]="n">{{ n }}</option>
+                  <option [value]="n" [selected]="n === pageSize()">{{ n }}</option>
                 }
               </select>
             </label>
@@ -252,13 +247,13 @@
           <button type="button" (click)="clearSelection()" class="text-sm text-ink-secondary dark:text-slate-400">Clear</button>
         }
       } @else {
-        <span class="text-sm text-ink-secondary dark:text-slate-400">Click a tile to preview · turn on Select to multi-select / copy</span>
+        <span class="text-sm text-ink-secondary dark:text-slate-400">Click a tile to preview · drag tiles onto a folder in the sidebar to copy them in</span>
       }
       <button
         type="button"
         (click)="shareSelected()"
         [disabled]="selectedCount() === 0 || sharing() || deleting() || loading() || scanning()"
-        title="Share selected files (AirDrop via Safari system share sheet)"
+        title="AirDrop selected files"
         class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
         <span class="material-icons-outlined !text-lg">ios_share</span>
         {{ sharing() ? 'Sharing…' : 'Share' }}
@@ -284,12 +279,24 @@
         No {{ mediaFilter() === 'video' ? 'videos' : mediaFilter() === 'image' ? 'images' : mediaFilter() === 'junk' ? 'junk files' : 'files' }} match this filter.
       </p>
     } @else {
-      <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+      <div
+        class="grid gap-4"
+        [class]="gridClass"
+        [style.--per-row]="perRow()"
+        cdkDropList
+        cdkDropListOrientation="mixed"
+        [cdkDropListSortingDisabled]="true"
+        [cdkDropListData]="items()">
         @for (item of items(); track item.rel_path) {
           <button
             type="button"
-            draggable="true"
-            (dragstart)="onDragStart($event, item)"
+            cdkDrag
+            [cdkDragData]="item"
+            [cdkDragDisabled]="item.kind === 'junk'"
+            [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+            (cdkDragStarted)="onTileDragStarted(item)"
+            (cdkDragMoved)="onTileDragMoved($event)"
+            (cdkDragEnded)="onTileDragEnded($event)"
             (click)="onTileClick(item, $event)"
             [attr.title]="item.rel_path"
             class="group relative w-full aspect-[9/16] overflow-hidden rounded-2xl bg-[#1a1a1a] text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500"
@@ -316,6 +323,9 @@
                   loop
                   class="pointer-events-none absolute inset-0 h-full w-full object-cover"></video>
               }
+              @if (durationLabel(item); as dur) {
+                <span class="pointer-events-none absolute right-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">{{ dur }}</span>
+              }
               <span class="pointer-events-none absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
                 <span class="material-icons-outlined !text-[18px]">play_arrow</span>
               </span>
@@ -332,6 +342,22 @@
             <span class="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-6 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
               {{ item.name }}
             </span>
+            <ng-container *cdkDragPreview>
+              <div class="flex max-w-[260px] items-center gap-2 rounded-xl border border-blue-500/60 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 shadow-2xl">
+                @if (dragChipThumb(item); as thumb) {
+                  <img [src]="thumb" alt="" class="h-10 w-7 shrink-0 rounded object-cover" />
+                } @else {
+                  <span class="flex h-10 w-7 shrink-0 items-center justify-center rounded bg-black text-white">
+                    <span class="material-icons-outlined !text-base">{{ item.kind === 'video' ? 'play_arrow' : 'image' }}</span>
+                  </span>
+                }
+                <span class="min-w-0">
+                  <span class="block font-semibold">{{ dragChipLabel() }}</span>
+                  <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
+                </span>
+              </div>
+            </ng-container>
+            <div *cdkDragPlaceholder class="aspect-[9/16] w-full rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
           </button>
         }
       </div>

@@ -11,6 +11,26 @@ export interface Folder {
   name: string;
   position: number;
   count: number;
+  /** Sidebar section the folder sits in (null = ungrouped, listed after all sections). */
+  section_id: number | null;
+}
+
+/** A named group of folders in the sidebar. */
+export interface FolderSection {
+  id: number;
+  name: string;
+  position: number;
+}
+
+/** One block of the sidebar: ungrouped folders (section null) or a section with its folders. */
+export interface FolderGroup {
+  section: FolderSection | null;
+  folders: Folder[];
+}
+
+interface SidebarData {
+  sections: FolderSection[];
+  folders: Folder[];
 }
 
 interface ApiWrapper<T> {
@@ -32,6 +52,19 @@ export class FoldersService {
   private dump = inject(DumpService);
 
   readonly folders = signal<Folder[]>([]);
+  readonly sections = signal<FolderSection[]>([]);
+  /** Section whose name is being edited inline (set right after creating one). */
+  readonly renamingSectionId = signal<number | null>(null);
+
+  /** Sidebar blocks in order: each section with its folders, then ungrouped folders last. */
+  readonly groups = computed<FolderGroup[]>(() => {
+    const sections = this.sections();
+    const known = new Set(sections.map((s) => s.id));
+    const folders = this.folders();
+    const inSection = (id: number | null) =>
+      folders.filter((f) => (id === null ? f.section_id == null || !known.has(f.section_id) : f.section_id === id));
+    return [...sections.map((s) => ({ section: s, folders: inSection(s.id) })), { section: null, folders: inSection(null) }];
+  });
   readonly loaded = signal(false);
   /** Folder whose name is being edited inline in the sidebar (set right after creating one). */
   readonly renamingId = signal<number | null>(null);
@@ -43,26 +76,34 @@ export class FoldersService {
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   load(): void {
-    this.request<Folder[]>('GET', '/api/folders').subscribe({
-      next: (folders) => {
-        this.folders.set(folders);
+    this.request<SidebarData>('GET', '/api/sidebar').subscribe({
+      next: (data) => {
+        this.applySidebar(data);
         this.loaded.set(true);
       },
       error: () => {},
     });
   }
 
-  clear(): void {
-    this.folders.set([]);
-    this.loaded.set(false);
-    this.renamingId.set(null);
+  private applySidebar(data: SidebarData | null | undefined): void {
+    if (!data) return;
+    this.sections.set(data.sections ?? []);
+    this.folders.set(data.folders ?? []);
   }
 
-  /** Creates the next "Folder N" at the bottom and puts it into rename mode. */
-  create(): Observable<Folder> {
-    return this.request<Folder>('POST', '/api/folders', {}).pipe(
+  clear(): void {
+    this.folders.set([]);
+    this.sections.set([]);
+    this.loaded.set(false);
+    this.renamingId.set(null);
+    this.renamingSectionId.set(null);
+  }
+
+  /** Creates the next "Folder N" at the bottom (of a section, if given) and puts it into rename mode. */
+  create(sectionId: number | null = null): Observable<Folder> {
+    return this.request<Folder>('POST', '/api/folders', sectionId ? { section_id: sectionId } : {}).pipe(
       tap((folder) => {
-        this.folders.update((list) => [...list, { ...folder, count: 0 }]);
+        this.folders.update((list) => [...list, { ...folder, count: 0, section_id: folder.section_id ?? sectionId }]);
         this.renamingId.set(folder.id);
       }),
       catchError((err: Error) => {
@@ -92,18 +133,93 @@ export class FoldersService {
     );
   }
 
-  /** Moves a folder from one sidebar position to another (optimistic). */
-  reorder(fromIndex: number, toIndex: number): void {
-    const before = this.folders();
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || toIndex >= before.length) return;
-    const next = [...before];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    this.folders.set(next);
-    this.request<Folder[]>('PUT', '/api/folders/order', { ids: next.map((f) => f.id) }).subscribe({
+  /** Creates the next "Section N" at the bottom and puts it into rename mode. */
+  createSection(): Observable<FolderSection> {
+    return this.request<FolderSection>('POST', '/api/folder-sections', {}).pipe(
+      tap((section) => {
+        this.sections.update((list) => [...list, section]);
+        this.renamingSectionId.set(section.id);
+      }),
+      catchError((err: Error) => {
+        this.showNotice(err.message);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  renameSection(id: number, name: string): Observable<FolderSection> {
+    return this.request<FolderSection>('PATCH', `/api/folder-sections/${id}`, { name }).pipe(
+      tap((updated) => this.sections.update((list) => list.map((s) => (s.id === id ? { ...s, name: updated.name } : s)))),
+    );
+  }
+
+  /** Deletes a section; its folders stay and become ungrouped. */
+  removeSection(id: number): Observable<void> {
+    return this.request<SidebarData>('DELETE', `/api/folder-sections/${id}`).pipe(
+      tap((data) => this.applySidebar(data)),
+      map(() => undefined),
+      catchError((err: Error) => {
+        this.showNotice(err.message);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  /**
+   * Puts a folder into a section (null = ungrouped) at an index within that group (optimistic).
+   * Used by sidebar drag-and-drop and the Move up / Move down menu.
+   */
+  placeFolder(folderId: number, sectionId: number | null, index: number): void {
+    const groups = this.groups().map((g) => ({ section: g.section, folders: g.folders.filter((f) => f.id !== folderId) }));
+    const folder = this.byId().get(folderId);
+    const dest = groups.find((g) => (g.section?.id ?? null) === sectionId);
+    if (!folder || !dest) return;
+    const at = Math.max(0, Math.min(index, dest.folders.length));
+    dest.folders.splice(at, 0, { ...folder, section_id: sectionId });
+    this.saveLayout(this.sections(), groups.flatMap((g) => g.folders));
+  }
+
+  /** Moves a folder one step up or down within its group. */
+  nudgeFolder(folderId: number, delta: number): void {
+    const group = this.groups().find((g) => g.folders.some((f) => f.id === folderId));
+    if (!group) return;
+    const index = group.folders.findIndex((f) => f.id === folderId);
+    const to = index + delta;
+    if (to < 0 || to >= group.folders.length) return;
+    this.placeFolder(folderId, group.section?.id ?? null, to);
+  }
+
+  /** Moves a section one step up or down. */
+  nudgeSection(sectionId: number, delta: number): void {
+    const list = [...this.sections()];
+    const index = list.findIndex((s) => s.id === sectionId);
+    const to = index + delta;
+    if (index < 0 || to < 0 || to >= list.length) return;
+    const [moved] = list.splice(index, 1);
+    list.splice(to, 0, moved);
+    const order = new Map(list.map((s, i) => [s.id, i]));
+    // Folders follow their sections' new order; ungrouped stay last.
+    const rank = (g: FolderGroup) => (g.section ? order.get(g.section.id)! : list.length);
+    const folders = this.groups()
+      .slice()
+      .sort((a, b) => rank(a) - rank(b))
+      .flatMap((g) => g.folders);
+    this.saveLayout(list, folders);
+  }
+
+  private saveLayout(sections: FolderSection[], folders: Folder[]): void {
+    const beforeSections = this.sections();
+    const beforeFolders = this.folders();
+    this.sections.set(sections.map((s, i) => ({ ...s, position: i + 1 })));
+    this.folders.set(folders.map((f, i) => ({ ...f, position: i + 1 })));
+    this.request<SidebarData>('PUT', '/api/sidebar/layout', {
+      sections: sections.map((s) => s.id),
+      folders: folders.map((f) => ({ id: f.id, section_id: f.section_id ?? null })),
+    }).subscribe({
       error: (err: Error) => {
-        this.folders.set(before);
-        this.showNotice(`Couldn't reorder folders. ${err.message}`);
+        this.sections.set(beforeSections);
+        this.folders.set(beforeFolders);
+        this.showNotice(`Couldn't save the folder order. ${err.message}`);
       },
     });
   }
@@ -188,12 +304,12 @@ export class FoldersService {
     });
   }
 
-  /** Bumps a Home/folder badge count after promoting Local media into Dump. */
+  /** Bumps a Home/folder badge count after cards were added (e.g. copied from the camera). */
   noteAddedSaves(scope: MoveTarget, count: number): void {
     if (count) this.adjustCount(scope, count);
   }
 
-  /** Lowers a Home/folder/bin badge after a save was removed (e.g. moved into Local media). */
+  /** Lowers a Home/folder/bin badge after a save was removed elsewhere. */
   noteRemovedSaves(scope: SaveScope, count: number): void {
     if (count) this.adjustCount(scope, -count);
   }

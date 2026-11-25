@@ -193,3 +193,27 @@ func EnsureCameraThumbSingleFlight(ctx context.Context, downloadDir string, user
 	}()
 	return EnsureCameraThumb(ctx, downloadDir, userID, srcPath, relPath, size, mtimeNs)
 }
+
+// CameraVideoDurationMs returns a camera video's length in ms, cached next to its thumbnail
+// as {key}.ms. With probe=false it only reads the cache (cheap; used when listing items).
+// Returns 0 when unknown.
+func CameraVideoDurationMs(downloadDir string, userID int64, srcPath, relPath string, size, mtimeNs int64, probe bool) int64 {
+	if MediaType(relPath) != "video" {
+		return 0
+	}
+	side := filepath.Join(ThumbCacheDir(downloadDir, userID), thumbCacheKey(relPath, size, mtimeNs)+".ms")
+	if b, err := os.ReadFile(side); err == nil {
+		if ms, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil {
+			return ms
+		}
+	}
+	if !probe {
+		return 0
+	}
+	ms, err := probeDurationMs(srcPath)
+	if err != nil || ms <= 0 {
+		return 0
+	}
+	_ = os.WriteFile(side, []byte(strconv.FormatInt(ms, 10)), 0o644)
+	return ms
+}

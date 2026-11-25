@@ -13,23 +13,23 @@ func TestFolderCreateAutoNamesAndUniqueness(t *testing.T) {
 	folders := NewFolderRepo(db)
 	u := createUser(t, db, "f@example.com")
 
-	f1, err := folders.Create(ctx, u.ID, "")
+	f1, err := folders.Create(ctx, u.ID, "", nil)
 	if err != nil || f1.Name != "Folder 1" || f1.Position != 1 {
 		t.Fatalf("first auto folder = %+v, %v", f1, err)
 	}
-	f2, _ := folders.Create(ctx, u.ID, "  ")
+	f2, _ := folders.Create(ctx, u.ID, "  ", nil)
 	if f2.Name != "Folder 2" || f2.Position != 2 {
 		t.Fatalf("second auto folder = %+v", f2)
 	}
 	if _, err := folders.Rename(ctx, u.ID, f1.ID, "Shirts"); err != nil {
 		t.Fatal(err)
 	}
-	f3, _ := folders.Create(ctx, u.ID, "")
+	f3, _ := folders.Create(ctx, u.ID, "", nil)
 	if f3.Name != "Folder 1" {
 		t.Fatalf("auto name should reuse the free 'Folder 1', got %q", f3.Name)
 	}
 
-	if _, err := folders.Create(ctx, u.ID, "shirts"); !errors.Is(err, ErrFolderNameTaken) {
+	if _, err := folders.Create(ctx, u.ID, "shirts", nil); !errors.Is(err, ErrFolderNameTaken) {
 		t.Fatalf("case-insensitive duplicate create err = %v", err)
 	}
 	if _, err := folders.Rename(ctx, u.ID, f2.ID, "SHIRTS"); !errors.Is(err, ErrFolderNameTaken) {
@@ -43,7 +43,7 @@ func TestFolderCreateAutoNamesAndUniqueness(t *testing.T) {
 	}
 
 	other := createUser(t, db, "other@example.com")
-	if _, err := folders.Create(ctx, other.ID, "Shirts"); err != nil {
+	if _, err := folders.Create(ctx, other.ID, "Shirts", nil); err != nil {
 		t.Fatalf("another user can use the same name: %v", err)
 	}
 	if _, err := folders.Rename(ctx, other.ID, f1.ID, "Mine"); !errors.Is(err, ErrFolderNotFound) {
@@ -57,11 +57,11 @@ func TestFolderLimit(t *testing.T) {
 	folders := NewFolderRepo(db)
 	u := createUser(t, db, "limit@example.com")
 	for i := 0; i < MaxFolders; i++ {
-		if _, err := folders.Create(ctx, u.ID, ""); err != nil {
+		if _, err := folders.Create(ctx, u.ID, "", nil); err != nil {
 			t.Fatalf("create #%d: %v", i+1, err)
 		}
 	}
-	if _, err := folders.Create(ctx, u.ID, ""); !errors.Is(err, ErrTooManyFolders) {
+	if _, err := folders.Create(ctx, u.ID, "", nil); !errors.Is(err, ErrTooManyFolders) {
 		t.Fatalf("over limit err = %v", err)
 	}
 }
@@ -71,9 +71,9 @@ func TestFolderReorder(t *testing.T) {
 	ctx := context.Background()
 	folders := NewFolderRepo(db)
 	u := createUser(t, db, "r@example.com")
-	a, _ := folders.Create(ctx, u.ID, "A")
-	b, _ := folders.Create(ctx, u.ID, "B")
-	c, _ := folders.Create(ctx, u.ID, "C")
+	a, _ := folders.Create(ctx, u.ID, "A", nil)
+	b, _ := folders.Create(ctx, u.ID, "B", nil)
+	c, _ := folders.Create(ctx, u.ID, "C", nil)
 
 	if err := folders.Reorder(ctx, u.ID, []int64{c.ID, a.ID, b.ID}); err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestFolderReorder(t *testing.T) {
 	}
 
 	other := createUser(t, db, "r2@example.com")
-	x, _ := folders.Create(ctx, other.ID, "X")
+	x, _ := folders.Create(ctx, other.ID, "X", nil)
 	for _, bad := range [][]int64{
 		{a.ID, b.ID},           // missing one
 		{a.ID, b.ID, b.ID},     // duplicate
@@ -105,8 +105,8 @@ func TestFolderSavesMoveAndDelete(t *testing.T) {
 	u := createUser(t, db, "m@example.com")
 	other := createUser(t, db, "m2@example.com")
 
-	shirts, _ := folders.Create(ctx, u.ID, "Shirts")
-	othersFolder, _ := folders.Create(ctx, other.ID, "Theirs")
+	shirts, _ := folders.Create(ctx, u.ID, "Shirts", nil)
+	othersFolder, _ := folders.Create(ctx, other.ID, "Theirs", nil)
 
 	s1, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/1", "instagram", "web", nil)
 	s2, _ := saves.Insert(ctx, u.ID, "https://instagram.com/reel/2", "instagram", "web", &shirts.ID)

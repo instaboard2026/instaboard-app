@@ -11,6 +11,8 @@ export class PlaybackService {
   readonly autoplay = signal(this.cacheService.getItem<boolean>(AUTOPLAY_KEY) ?? true);
   /** True while a card is being dragged: videos pause so the drag stays smooth. */
   readonly dragPause = signal(false);
+  /** True while a full-size player is open: grid videos stop so it gets the disk and decoder. */
+  readonly previewPause = signal(false);
 
   constructor() {
     effect(() => this.cacheService.setItem(AUTOPLAY_KEY, this.autoplay()));

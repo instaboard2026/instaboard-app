@@ -45,7 +45,7 @@
           routerLinkActive="!bg-nav-active !text-white"
           data-drop-folder="dump"
           class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
-          [class.drop-target-active]="cardDrag.isHovered('dump') || cameraDrag.isDumpHovered('dump')">
+          [class.drop-target-active]="cardDrag.isHovered('dump') || cameraDrag.isHovered('dump')">
           <span class="material-icons-outlined !text-xl shrink-0">home</span>
           <span class="flex-1">Home</span>
           @if (isLoggedIn() && dumpCount() > 0) {
@@ -83,197 +83,204 @@
         </a>
 
         @if (isLoggedIn()) {
-          <div class="flex items-center justify-between px-2 pt-5 pb-1">
-            <span class="text-xs font-medium text-nav-muted">Local media</span>
-            <button
-              type="button"
-              (click)="createLocalMediaFolder()"
-              [disabled]="creatingLocalMedia()"
-              [appTooltip]="'New Local media folder'"
-              aria-label="New Local media folder"
-              class="-mr-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
-              <span class="material-icons-outlined !text-lg">add</span>
-            </button>
-          </div>
-
-          <div
-            cdkDropList
-            cdkDropListLockAxis="y"
-            [cdkDropListData]="localMediaFolders()"
-            (cdkDropListDropped)="onLocalMediaReorderDropped($event)"
-            class="flex flex-col gap-0.5">
-            @for (folder of localMediaFolders(); track folder.id; let i = $index; let first = $first; let last = $last) {
-              <div
-                cdkDrag
-                [cdkDragData]="folder"
-                [cdkDragDisabled]="localMediaRenamingId() === folder.id"
-                [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
-                (cdkDragStarted)="onLocalMediaReorderStarted()"
-                [attr.data-drop-local-media]="folder.id"
-                role="link"
-                tabindex="0"
-                (click)="openLocalMediaFolder(folder)"
-                (keydown.enter)="openLocalMediaFolder(folder)"
-                class="folder-row group relative flex h-[30px] cursor-pointer items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
-                [class.!bg-nav-active]="isActiveLocalMediaFolder(folder)"
-                [class.!text-white]="isActiveLocalMediaFolder(folder)"
-                [class.drop-target-active]="cameraDrag.isHovered(folder.id) || cardDrag.isLocalMediaHovered(folder.id)">
-                <span class="material-icons-outlined !text-xl shrink-0">perm_media</span>
-
-                @if (localMediaRenamingId() === folder.id) {
-                  <input
-                    #lmNameInput
-                    appAutofocusSelect
-                    type="text"
-                    maxlength="50"
-                    [value]="folder.name"
-                    (click)="$event.stopPropagation()"
-                    (keydown.enter)="$event.stopPropagation(); commitLocalMediaRename(folder, lmNameInput.value)"
-                    (keydown.escape)="cancelLocalMediaRename()"
-                    (blur)="commitLocalMediaRename(folder, lmNameInput.value)"
-                    aria-label="Local media folder name"
-                    class="min-w-0 flex-1 rounded-md border border-blue-500 bg-[#1a1a1a] px-1.5 py-0.5 text-sm text-white outline-none focus:ring-0" />
-                } @else {
-                  <span class="min-w-0 flex-1 truncate">{{ folder.name }}</span>
-                  @if (folder.count > 0) {
-                    <span class="text-xs text-nav-muted group-hover:hidden" [class.hidden]="localMediaMenuOpenId() === folder.id">{{ folder.count }}</span>
+          <div cdkDropListGroup class="flex flex-col pt-2">
+            @for (group of groups(); track group.section?.id ?? 0) {
+              @if (group.section; as section) {
+                <div class="group/section relative mt-4 flex h-6 items-center gap-1 px-2">
+                  @if (renamingSectionId() === section.id) {
+                    <input
+                      #sectionInput
+                      appAutofocusSelect
+                      type="text"
+                      maxlength="50"
+                      [value]="section.name"
+                      (click)="$event.stopPropagation()"
+                      (keydown.enter)="$event.stopPropagation(); commitSectionRename(section, sectionInput.value)"
+                      (keydown.escape)="cancelSectionRename()"
+                      (blur)="commitSectionRename(section, sectionInput.value)"
+                      aria-label="Section name"
+                      class="min-w-0 flex-1 rounded-md border border-blue-500 bg-[#1a1a1a] px-1.5 py-0.5 text-xs font-medium text-white outline-none focus:ring-0" />
+                  } @else {
+                    <span
+                      class="min-w-0 flex-1 truncate text-xs font-medium text-nav-muted"
+                      (dblclick)="startSectionRename(section, $event)">{{ section.name }}</span>
+                    <button
+                      type="button"
+                      (click)="createFolder(section.id, $event)"
+                      [disabled]="creating()"
+                      [attr.aria-label]="'New folder in ' + section.name"
+                      [appTooltip]="'New folder in ' + section.name"
+                      class="hidden group-hover/section:inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
+                      <span class="material-icons-outlined !text-base">add</span>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="toggleSectionMenu(section, $event)"
+                      [attr.aria-label]="'Options for section ' + section.name"
+                      class="-mr-1 hidden group-hover/section:inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white"
+                      [class.!inline-flex]="sectionMenuOpenId() === section.id">
+                      <span class="material-icons-outlined !text-base">more_horiz</span>
+                    </button>
                   }
-                  <button
-                    type="button"
-                    (click)="toggleLocalMediaMenu(folder, $event)"
-                    [attr.aria-label]="'Options for ' + folder.name"
-                    class="hidden group-hover:inline-flex -mr-1 h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-active hover:text-white"
-                    [class.!inline-flex]="localMediaMenuOpenId() === folder.id">
-                    <span class="material-icons-outlined !text-base">more_horiz</span>
-                  </button>
-                }
 
-                @if (localMediaMenuOpenId() === folder.id) {
-                  <div
-                    (click)="$event.stopPropagation()"
-                    class="absolute right-1 top-full z-20 mt-1 w-44 overflow-hidden rounded-xl border border-nav-border bg-[#1a1a1a] p-1 text-xs text-nav-text shadow-2xl">
-                    <button type="button" (click)="startLocalMediaRename(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
-                      <span class="material-icons-outlined !text-base">edit</span> Rename
+                  @if (sectionMenuOpenId() === section.id) {
+                    <div
+                      (click)="$event.stopPropagation()"
+                      class="absolute right-1 top-full z-20 mt-1 w-48 overflow-hidden rounded-xl border border-nav-border bg-[#1a1a1a] p-1 text-xs text-nav-text shadow-2xl">
+                      <button type="button" (click)="createFolder(section.id, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                        <span class="material-icons-outlined !text-base">add</span> New folder here
+                      </button>
+                      <button type="button" (click)="startSectionRename(section, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                        <span class="material-icons-outlined !text-base">edit</span> Rename section
+                      </button>
+                      <button type="button" (click)="moveSection(section, -1, $event)" [disabled]="isFirstSection(section)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                        <span class="material-icons-outlined !text-base">arrow_upward</span> Move section up
+                      </button>
+                      <button type="button" (click)="moveSection(section, 1, $event)" [disabled]="isLastSection(section)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                        <span class="material-icons-outlined !text-base">arrow_downward</span> Move section down
+                      </button>
+                      <div class="my-1 border-t border-nav-border"></div>
+                      <button type="button" (click)="deleteSection(section, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-red-400 hover:bg-red-500/10">
+                        <span class="material-icons-outlined !text-base">delete</span> Delete section
+                      </button>
+                    </div>
+                  }
+                </div>
+                @if (renamingSectionId() === section.id && sectionRenameError()) {
+                  <p class="px-2.5 pb-1 text-[11px] text-red-400" role="alert">{{ sectionRenameError() }}</p>
+                }
+              } @else {
+                <!-- Ungrouped folders, after the sections. Always shown: it holds the create buttons. -->
+                <div class="mt-4 flex h-6 items-center justify-between gap-1 px-2">
+                  <span class="text-xs font-medium text-nav-muted">Other folders</span>
+                  <div class="-mr-1 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      (click)="createSection()"
+                      [disabled]="creatingSection()"
+                      [appTooltip]="'New section'"
+                      aria-label="New section"
+                      class="inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
+                      <span class="material-icons-outlined !text-base">playlist_add</span>
                     </button>
-                    <button type="button" (click)="moveLocalMediaFolder(i, -1, $event)" [disabled]="first" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
-                      <span class="material-icons-outlined !text-base">arrow_upward</span> Move up
-                    </button>
-                    <button type="button" (click)="moveLocalMediaFolder(i, 1, $event)" [disabled]="last" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
-                      <span class="material-icons-outlined !text-base">arrow_downward</span> Move down
-                    </button>
-                    <div class="my-1 border-t border-nav-border"></div>
-                    <button type="button" (click)="deleteLocalMediaFolder(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-red-400 hover:bg-red-500/10">
-                      <span class="material-icons-outlined !text-base">delete</span> Delete
+                    <button
+                      type="button"
+                      (click)="createFolder()"
+                      [disabled]="creating()"
+                      [appTooltip]="'New folder'"
+                      aria-label="New folder"
+                      class="inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
+                      <span class="material-icons-outlined !text-lg">add</span>
                     </button>
                   </div>
-                }
-
-                <div *cdkDragPlaceholder class="my-0.5 h-[30px] rounded-xl border border-dashed border-white/25 bg-white/5"></div>
-              </div>
-              @if (localMediaRenamingId() === folder.id && localMediaRenameError()) {
-                <p class="px-2.5 pb-1 text-[11px] text-red-400" role="alert">{{ localMediaRenameError() }}</p>
+                </div>
               }
-            } @empty {
-              <p class="px-2.5 py-1 text-xs text-nav-muted">No folders yet. Click + to create one.</p>
-            }
-          </div>
 
-          @if (localMediaService.notice(); as lmNotice) {
-            <p class="mx-1 mt-2 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-300" role="status">{{ lmNotice }}</p>
-          }
-
-          <div class="flex items-center justify-between px-2 pt-5 pb-1">
-            <span class="text-xs font-medium text-nav-muted">Folders</span>
-            <button
-              type="button"
-              (click)="createFolder()"
-              [disabled]="creating()"
-              [appTooltip]="'New folder'"
-              aria-label="New folder"
-              class="-mr-1 inline-flex h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-hover hover:text-white disabled:opacity-50">
-              <span class="material-icons-outlined !text-lg">add</span>
-            </button>
-          </div>
-
-          <div
-            cdkDropList
-            cdkDropListLockAxis="y"
-            [cdkDropListData]="folders()"
-            (cdkDropListDropped)="onReorderDropped($event)"
-            class="flex flex-col gap-0.5">
-            @for (folder of folders(); track folder.id; let i = $index; let first = $first; let last = $last) {
               <div
-                cdkDrag
-                [cdkDragData]="folder"
-                [cdkDragDisabled]="renamingId() === folder.id"
-                [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
-                (cdkDragStarted)="onReorderStarted()"
-                [attr.data-drop-folder]="folder.id"
-                role="link"
-                tabindex="0"
-                (click)="openFolder(folder)"
-                (keydown.enter)="openFolder(folder)"
-                class="folder-row group relative flex h-[30px] cursor-pointer items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
-                [class.!bg-nav-active]="isActiveFolder(folder)"
-                [class.!text-white]="isActiveFolder(folder)"
-                [class.drop-target-active]="cardDrag.isHovered(folder.id) || cameraDrag.isDumpHovered(folder.id)">
-                <span class="material-icons-outlined !text-xl shrink-0">folder</span>
-
-                @if (renamingId() === folder.id) {
-                  <input
-                    #nameInput
-                    appAutofocusSelect
-                    type="text"
-                    maxlength="50"
-                    [value]="folder.name"
-                    (click)="$event.stopPropagation()"
-                    (keydown.enter)="$event.stopPropagation(); commitRename(folder, nameInput.value)"
-                    (keydown.escape)="cancelRename()"
-                    (blur)="commitRename(folder, nameInput.value)"
-                    aria-label="Folder name"
-                    class="min-w-0 flex-1 rounded-md border border-blue-500 bg-[#1a1a1a] px-1.5 py-0.5 text-sm text-white outline-none focus:ring-0" />
-                } @else {
-                  <span class="min-w-0 flex-1 truncate">{{ folder.name }}</span>
-                  @if (folder.count > 0) {
-                    <span class="text-xs text-nav-muted group-hover:hidden" [class.hidden]="menuOpenId() === folder.id">{{ folder.count }}</span>
-                  }
-                  <button
-                    type="button"
-                    (click)="toggleMenu(folder, $event)"
-                    [attr.aria-label]="'Options for ' + folder.name"
-                    class="hidden group-hover:inline-flex -mr-1 h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-active hover:text-white"
-                    [class.!inline-flex]="menuOpenId() === folder.id">
-                    <span class="material-icons-outlined !text-base">more_horiz</span>
-                  </button>
-                }
-
-                @if (menuOpenId() === folder.id) {
+                cdkDropList
+                cdkDropListLockAxis="y"
+                [id]="groupListId(group)"
+                [cdkDropListData]="group"
+                (cdkDropListDropped)="onFolderDropped($event)"
+                class="mt-0.5 flex min-h-[8px] flex-col gap-0.5 pl-2">
+                @for (folder of group.folders; track folder.id; let first = $first; let last = $last) {
                   <div
-                    (click)="$event.stopPropagation()"
-                    class="absolute right-1 top-full z-20 mt-1 w-44 overflow-hidden rounded-xl border border-nav-border bg-[#1a1a1a] p-1 text-xs text-nav-text shadow-2xl">
-                    <button type="button" (click)="startRename(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
-                      <span class="material-icons-outlined !text-base">edit</span> Rename
-                    </button>
-                    <button type="button" (click)="moveFolder(i, -1, $event)" [disabled]="first" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
-                      <span class="material-icons-outlined !text-base">arrow_upward</span> Move up
-                    </button>
-                    <button type="button" (click)="moveFolder(i, 1, $event)" [disabled]="last" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
-                      <span class="material-icons-outlined !text-base">arrow_downward</span> Move down
-                    </button>
-                    <div class="my-1 border-t border-nav-border"></div>
-                    <button type="button" (click)="deleteFolder(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-red-400 hover:bg-red-500/10">
-                      <span class="material-icons-outlined !text-base">delete</span> Delete
-                    </button>
-                  </div>
-                }
+                    cdkDrag
+                    [cdkDragData]="folder"
+                    [cdkDragDisabled]="renamingId() === folder.id"
+                    [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+                    (cdkDragStarted)="onReorderStarted()"
+                    [attr.data-drop-folder]="folder.id"
+                    role="link"
+                    tabindex="0"
+                    (click)="openFolder(folder)"
+                    (keydown.enter)="openFolder(folder)"
+                    class="folder-row group relative flex h-[30px] cursor-pointer items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
+                    [class.!bg-nav-active]="isActiveFolder(folder)"
+                    [class.!text-white]="isActiveFolder(folder)"
+                    [class.drop-target-active]="cardDrag.isHovered(folder.id) || cameraDrag.isHovered(folder.id)">
+                    <span class="material-icons-outlined !text-xl shrink-0">folder</span>
 
-                <div *cdkDragPlaceholder class="my-0.5 h-[30px] rounded-xl border border-dashed border-white/25 bg-white/5"></div>
+                    @if (renamingId() === folder.id) {
+                      <input
+                        #nameInput
+                        appAutofocusSelect
+                        type="text"
+                        maxlength="50"
+                        [value]="folder.name"
+                        (click)="$event.stopPropagation()"
+                        (keydown.enter)="$event.stopPropagation(); commitRename(folder, nameInput.value)"
+                        (keydown.escape)="cancelRename()"
+                        (blur)="commitRename(folder, nameInput.value)"
+                        aria-label="Folder name"
+                        class="min-w-0 flex-1 rounded-md border border-blue-500 bg-[#1a1a1a] px-1.5 py-0.5 text-sm text-white outline-none focus:ring-0" />
+                    } @else {
+                      <span class="min-w-0 flex-1 truncate">{{ folder.name }}</span>
+                      @if (folder.count > 0) {
+                        <span class="text-xs text-nav-muted group-hover:hidden" [class.hidden]="menuOpenId() === folder.id">{{ folder.count }}</span>
+                      }
+                      <button
+                        type="button"
+                        (click)="toggleMenu(folder, $event)"
+                        [attr.aria-label]="'Options for ' + folder.name"
+                        class="hidden group-hover:inline-flex -mr-1 h-6 w-6 items-center justify-center rounded-md text-nav-muted hover:bg-nav-active hover:text-white"
+                        [class.!inline-flex]="menuOpenId() === folder.id">
+                        <span class="material-icons-outlined !text-base">more_horiz</span>
+                      </button>
+                    }
+
+                    @if (menuOpenId() === folder.id) {
+                      <div
+                        (click)="$event.stopPropagation()"
+                        class="absolute right-1 top-full z-20 mt-1 max-h-80 w-52 overflow-y-auto rounded-xl border border-nav-border bg-[#1a1a1a] p-1 text-xs text-nav-text shadow-2xl">
+                        <button type="button" (click)="startRename(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                          <span class="material-icons-outlined !text-base">edit</span> Rename
+                        </button>
+                        <button type="button" (click)="moveFolder(folder, -1, $event)" [disabled]="first" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                          <span class="material-icons-outlined !text-base">arrow_upward</span> Move up
+                        </button>
+                        <button type="button" (click)="moveFolder(folder, 1, $event)" [disabled]="last" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active disabled:opacity-40 disabled:hover:bg-transparent">
+                          <span class="material-icons-outlined !text-base">arrow_downward</span> Move down
+                        </button>
+                        @if (sections().length > 0) {
+                          <div class="my-1 border-t border-nav-border"></div>
+                          <p class="px-2.5 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-nav-muted">Move to section</p>
+                          @for (s of sections(); track s.id) {
+                            @if (s.id !== folder.section_id) {
+                              <button type="button" (click)="moveFolderToSection(folder, s.id, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                                <span class="material-icons-outlined !text-base">drive_file_move</span>
+                                <span class="min-w-0 truncate">{{ s.name }}</span>
+                              </button>
+                            }
+                          }
+                          @if (folder.section_id != null) {
+                            <button type="button" (click)="moveFolderToSection(folder, null, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-nav-active">
+                              <span class="material-icons-outlined !text-base">logout</span> Remove from section
+                            </button>
+                          }
+                        }
+                        <div class="my-1 border-t border-nav-border"></div>
+                        <button type="button" (click)="deleteFolder(folder, $event)" class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-red-400 hover:bg-red-500/10">
+                          <span class="material-icons-outlined !text-base">delete</span> Delete
+                        </button>
+                      </div>
+                    }
+
+                    <div *cdkDragPlaceholder class="my-0.5 h-[30px] rounded-xl border border-dashed border-white/25 bg-white/5"></div>
+                  </div>
+                  @if (renamingId() === folder.id && renameError()) {
+                    <p class="px-2.5 pb-1 text-[11px] text-red-400" role="alert">{{ renameError() }}</p>
+                  }
+                } @empty {
+                  @if (group.section) {
+                    <p class="mx-1 rounded-lg border border-dashed border-white/10 px-2.5 py-1.5 text-[11px] text-nav-muted">Drag folders here</p>
+                  } @else if (sections().length === 0) {
+                    <p class="px-2.5 py-1 text-xs text-nav-muted">No folders yet. Click + to create one.</p>
+                  } @else {
+                    <p class="mx-1 rounded-lg border border-dashed border-white/10 px-2.5 py-1.5 text-[11px] text-nav-muted">Drag folders here to take them out of a section</p>
+                  }
+                }
               </div>
-              @if (renamingId() === folder.id && renameError()) {
-                <p class="px-2.5 pb-1 text-[11px] text-red-400" role="alert">{{ renameError() }}</p>
-              }
-            } @empty {
-              <p class="px-2.5 py-1 text-xs text-nav-muted">No folders yet. Click + to create one.</p>
             }
           </div>
 
@@ -339,7 +346,7 @@
         [appTooltip]="'Home'"
         aria-label="Home"
         class="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
-        [class.drop-target-active]="cardDrag.isHovered('dump') || cameraDrag.isDumpHovered('dump')">
+        [class.drop-target-active]="cardDrag.isHovered('dump') || cameraDrag.isHovered('dump')">
         <span class="material-icons-outlined !text-xl">home</span>
         @if (isLoggedIn() && dumpCount() > 0) {
           <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-nav-bg"></span>
@@ -376,32 +383,9 @@
       </a>
 
       @if (isLoggedIn()) {
-        <div class="my-2 h-px w-6 shrink-0 bg-nav-border"></div>
-        @for (folder of localMediaFolders(); track folder.id) {
-          <button
-            type="button"
-            (click)="openLocalMediaFolder(folder)"
-            [attr.data-drop-local-media]="folder.id"
-            [appTooltip]="folder.name"
-            [attr.aria-label]="folder.name"
-            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
-            [class.!bg-nav-active]="isActiveLocalMediaFolder(folder)"
-            [class.!text-white]="isActiveLocalMediaFolder(folder)"
-            [class.drop-target-active]="cameraDrag.isHovered(folder.id) || cardDrag.isLocalMediaHovered(folder.id)">
-            <span class="material-icons-outlined !text-xl">perm_media</span>
-          </button>
-        }
-        <button
-          type="button"
-          (click)="createLocalMediaFolderFromRail()"
-          [disabled]="creatingLocalMedia()"
-          [appTooltip]="'New Local media folder'"
-          aria-label="New Local media folder"
-          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-muted transition-colors hover:bg-nav-hover hover:text-white disabled:opacity-50">
-          <span class="material-icons-outlined !text-xl">create_new_folder</span>
-        </button>
-        <div class="my-2 h-px w-6 shrink-0 bg-nav-border"></div>
-        @for (folder of folders(); track folder.id) {
+        @for (group of groups(); track group.section?.id ?? 0) {
+        <div class="my-2 h-px w-6 shrink-0 bg-nav-border" [attr.title]="group.section?.name"></div>
+        @for (folder of group.folders; track folder.id) {
           <button
             type="button"
             (click)="openFolder(folder)"
@@ -411,9 +395,10 @@
             class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover"
             [class.!bg-nav-active]="isActiveFolder(folder)"
             [class.!text-white]="isActiveFolder(folder)"
-            [class.drop-target-active]="cardDrag.isHovered(folder.id) || cameraDrag.isDumpHovered(folder.id)">
+            [class.drop-target-active]="cardDrag.isHovered(folder.id) || cameraDrag.isHovered(folder.id)">
             <span class="material-icons-outlined !text-xl">folder</span>
           </button>
+        }
         }
         <button
           type="button"

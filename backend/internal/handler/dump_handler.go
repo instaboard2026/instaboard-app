@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -53,6 +53,7 @@ type DumpHandler struct {
 	local          *repository.LocalMediaRepo
 	splitRepo      *repository.SplitRepo
 	splitter       *service.SplitService
+	copies         *repository.CameraCopyRepo
 	defaultDir     string
 	cookiesBrowser string
 }
@@ -327,86 +328,6 @@ func (h *DumpHandler) Download(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	utils.WriteSuccess(w, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
-}
-
-// PromoteFromLocalMedia moves Local media files into Home or a Dump folder as local save cards.
-func (h *DumpHandler) PromoteFromLocalMedia(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.UserIDFromContext(r.Context())
-	if userID == 0 {
-		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
-		return
-	}
-	if h.local == nil {
-		utils.WriteError(w, http.StatusInternalServerError, "local media unavailable", nil)
-		return
-	}
-	var body struct {
-		IDs      []uint64 `json:"ids"`
-		FolderID *int64   `json:"folder_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.IDs) == 0 {
-		utils.WriteError(w, http.StatusBadRequest, "ids required", nil)
-		return
-	}
-	if body.FolderID != nil && *body.FolderID <= 0 {
-		utils.WriteError(w, http.StatusBadRequest, "invalid folder id", nil)
-		return
-	}
-
-	dir, _ := h.downloadDir(r, userID)
-	lmDir := filepath.Join(dir, "local-media", strconv.FormatInt(userID, 10))
-	out := make([]saveResponse, 0, len(body.IDs))
-
-	for _, id := range body.IDs {
-		item, err := h.local.GetItem(r.Context(), userID, id)
-		if errors.Is(err, repository.ErrLocalMediaNotFound) {
-			utils.WriteError(w, http.StatusNotFound, "local media file not found", nil)
-			return
-		}
-		if err != nil {
-			slog.Error("get local media for promote failed", "err", err)
-			utils.WriteError(w, http.StatusInternalServerError, "could not move files", nil)
-			return
-		}
-		base := filepath.Base(item.StoredName)
-		if base != item.StoredName || strings.Contains(base, "..") {
-			utils.WriteError(w, http.StatusBadRequest, "invalid local media file", nil)
-			return
-		}
-		src := filepath.Join(lmDir, base)
-
-		url, err := newLocalURL()
-		if err != nil {
-			slog.Error("local url failed", "err", err)
-			utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
-			return
-		}
-		save, err := h.repo.Insert(r.Context(), userID, url, service.SourceLocal, "local-media", body.FolderID)
-		switch {
-		case errors.Is(err, repository.ErrFolderNotFound):
-			utils.WriteError(w, http.StatusNotFound, "folder not found", nil)
-			return
-		case err != nil:
-			slog.Error("insert promoted save failed", "err", err)
-			utils.WriteError(w, http.StatusInternalServerError, "failed to create card", nil)
-			return
-		}
-
-		state, storeErr := h.downloader.AdoptLocalFile(dir, save.ID, src)
-		if storeErr != nil {
-			h.removeDownloadFiles(r, userID, save.ID)
-			_ = h.repo.Delete(r.Context(), userID, save.ID)
-			slog.Error("adopt local media failed", "item", id, "err", storeErr)
-			utils.WriteError(w, http.StatusInternalServerError, "could not move file into folder", nil)
-			return
-		}
-		if _, err := h.local.DeleteItem(r.Context(), userID, id); err != nil {
-			slog.Warn("promoted save but local media row remains", "item", id, "err", err)
-		}
-		out = append(out, saveResponse{Save: *save, Download: h.withMedia(userID, dir, save.ID, state)})
-	}
-
-	utils.WriteJSON(w, http.StatusCreated, utils.APIResponse{Status: "SUCCESS", Data: out})
 }
 
 // CreateFromSplit copies a Split master or clip into Home or a Dump folder as a local save card.
@@ -698,4 +619,37 @@ func (h *DumpHandler) Media(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeContent(w, r, file, fi.ModTime(), f)
+}
+
+// SetCameraCopies lets saves made from camera files be remembered as copied.
+func (h *DumpHandler) SetCameraCopies(c *repository.CameraCopyRepo) { h.copies = c }
+
+// saveLocalFile turns a file on disk into a card in Home (folderID nil) or a folder.
+// move=true moves the file into the download folder; false copies it (camera card stays intact).
+// cameraName (if set) is recorded so the camera page shows that card file as copied.
+func (h *DumpHandler) saveLocalFile(ctx context.Context, userID int64, dir string, folderID *int64, src, cameraName, addedFrom string, move bool) (uint64, error) {
+	url, err := newLocalURL()
+	if err != nil {
+		return 0, err
+	}
+	save, err := h.repo.Insert(ctx, userID, url, service.SourceLocal, addedFrom, folderID)
+	if err != nil {
+		return 0, err
+	}
+	if move {
+		_, err = h.downloader.AdoptLocalFile(dir, save.ID, src)
+	} else {
+		_, err = h.downloader.CopyLocalFile(dir, save.ID, src)
+	}
+	if err != nil {
+		_ = h.downloader.RemoveFiles(dir, save.ID)
+		_ = h.repo.Delete(ctx, userID, save.ID)
+		return 0, err
+	}
+	if h.copies != nil && cameraName != "" {
+		if err := h.copies.Record(ctx, userID, cameraName, save.ID); err != nil {
+			slog.Warn("record camera copy failed", "save_id", save.ID, "err", err)
+		}
+	}
+	return save.ID, nil
 }

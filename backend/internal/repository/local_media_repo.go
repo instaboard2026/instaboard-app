@@ -466,3 +466,21 @@ func scanLocalMediaRows(rows *sql.Rows) ([]models.LocalMedia, error) {
 	}
 	return out, rows.Err()
 }
+
+// UserIDs returns every user that still has Local media folders (for the one-time move to Folders).
+func (r *LocalMediaRepo) UserIDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT user_id FROM tbl_local_media_folders`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

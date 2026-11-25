@@ -20,6 +20,14 @@ export class MediaMemoryCacheService {
 
   readonly bytes = signal(0);
   readonly count = signal(0);
+  /** Video length (ms) reported by thumbnail responses, keyed like entries. */
+  private readonly durations = signal<ReadonlyMap<string, number>>(new Map());
+
+  /** Duration the server sent with this thumbnail (X-Duration-Ms), or null. */
+  durationMs(url: string | null | undefined): number | null {
+    if (!url) return null;
+    return this.durations().get(this.keyFromUrl(url)) ?? null;
+  }
   readonly label = computed(() => formatBytes(this.bytes()));
 
   /** Stable key across HMAC query rotation. */
@@ -54,6 +62,10 @@ export class MediaMemoryCacheService {
     const job = (async () => {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`media cache fetch ${res.status}`);
+      const dur = Number(res.headers.get('X-Duration-Ms'));
+      if (Number.isFinite(dur) && dur > 0) {
+        this.durations.update((m) => new Map(m).set(key, dur));
+      }
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       this.entries.set(key, { objectUrl, bytes: blob.size, lastUsed: Date.now() });

@@ -1,6 +1,7 @@
 /**
- * App sidebar nav: Home (badge = links not in a folder), the user's Folders (create with inline
- * rename, menu to rename / move / delete, drag to reorder), and a Bin. Home, folder rows, and the Bin
+ * App sidebar nav: Home (badge = links not in a folder), the user's Folders grouped into optional
+ * sections (create with inline rename, menus to rename / move / delete, drag folders to reorder or
+ * between sections), and a Bin. Home, folder rows, and the Bin
  * are drop targets for cards (see CardDragService); dropping on Bin soft-deletes. Click Bin to open it.
  */
 import { Component, ChangeDetectionStrategy, HostListener, input, output, inject, effect, signal, untracked } from '@angular/core';
@@ -8,12 +9,11 @@ import { CommonModule, NgTemplateOutlet } from '@angular/common';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs';
-import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop';
+import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { UserContextService } from '../../../services/user-context.service';
 import { AccountMenuModalService } from '../../../services/account-menu-modal.service';
 import { DumpService } from '../../../services/dump.service';
-import { Folder, FoldersService } from '../../../services/folders.service';
-import { LocalMediaFolder, LocalMediaService } from '../../../services/local-media.service';
+import { Folder, FolderGroup, FolderSection, FoldersService } from '../../../services/folders.service';
 import { CardDragService } from '../../../services/card-drag.service';
 import { CameraDragService } from '../../../services/camera-drag.service';
 import { ConfirmDialogService } from '../../../services/confirm-dialog.service';
@@ -23,7 +23,7 @@ import { TooltipDirective } from '../../directives/tooltip.directive';
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [CommonModule, NgTemplateOutlet, RouterLink, RouterLinkActive, CdkDropList, CdkDrag, AutofocusSelectDirective, TooltipDirective],
+  imports: [CommonModule, NgTemplateOutlet, RouterLink, RouterLinkActive, CdkDropList, CdkDropListGroup, CdkDrag, AutofocusSelectDirective, TooltipDirective],
   templateUrl: './sidebar.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -34,7 +34,6 @@ export class SidebarComponent {
   private router = inject(Router);
   private confirm = inject(ConfirmDialogService);
   readonly foldersService = inject(FoldersService);
-  readonly localMediaService = inject(LocalMediaService);
   readonly cardDrag = inject(CardDragService);
   readonly cameraDrag = inject(CameraDragService);
 
@@ -44,11 +43,12 @@ export class SidebarComponent {
   readonly renameError = signal<string | null>(null);
   readonly creating = signal(false);
 
-  readonly localMediaFolders = this.localMediaService.folders;
-  readonly localMediaRenamingId = this.localMediaService.renamingId;
-  readonly localMediaMenuOpenId = signal<number | null>(null);
-  readonly localMediaRenameError = signal<string | null>(null);
-  readonly creatingLocalMedia = signal(false);
+  readonly sections = this.foldersService.sections;
+  readonly groups = this.foldersService.groups;
+  readonly renamingSectionId = this.foldersService.renamingSectionId;
+  readonly sectionMenuOpenId = signal<number | null>(null);
+  readonly sectionRenameError = signal<string | null>(null);
+  readonly creatingSection = signal(false);
   private readonly currentPath = toSignal(
     this.router.events.pipe(
       filter((e): e is NavigationEnd => e instanceof NavigationEnd),
@@ -59,8 +59,7 @@ export class SidebarComponent {
   /** Set while a folder row is being dragged, so the click that ends the drag doesn't navigate. */
   private reordering = false;
   private savingRename = false;
-  private localMediaReordering = false;
-  private savingLocalMediaRename = false;
+  private savingSectionRename = false;
 
   constructor() {
     effect(() => {
@@ -68,7 +67,6 @@ export class SidebarComponent {
         untracked(() => {
           this.dumpService.clear();
           this.foldersService.clear();
-          this.localMediaService.clear();
         });
         return;
       }
@@ -79,9 +77,6 @@ export class SidebarComponent {
         if (!this.foldersService.loaded()) {
           this.foldersService.load();
         }
-        if (!this.localMediaService.loaded()) {
-          this.localMediaService.loadFolders();
-        }
       });
     });
   }
@@ -89,14 +84,16 @@ export class SidebarComponent {
   @HostListener('document:click')
   closeMenu(): void {
     this.menuOpenId.set(null);
-    this.localMediaMenuOpenId.set(null);
+    this.sectionMenuOpenId.set(null);
   }
 
-  createFolder(): void {
+  createFolder(sectionId: number | null = null, event?: Event): void {
+    event?.stopPropagation();
+    this.sectionMenuOpenId.set(null);
     if (this.creating()) return;
     this.creating.set(true);
     this.renameError.set(null);
-    this.foldersService.create().subscribe({
+    this.foldersService.create(sectionId).subscribe({
       next: () => this.creating.set(false),
       error: () => this.creating.set(false),
     });
@@ -140,10 +137,18 @@ export class SidebarComponent {
     this.menuOpenId.update((id) => (id === folder.id ? null : folder.id));
   }
 
-  moveFolder(index: number, delta: number, event: Event): void {
+  moveFolder(folder: Folder, delta: number, event: Event): void {
     event.stopPropagation();
     this.menuOpenId.set(null);
-    this.foldersService.reorder(index, index + delta);
+    this.foldersService.nudgeFolder(folder.id, delta);
+  }
+
+  /** Puts a folder into another section (null = ungrouped), at the bottom of it. */
+  moveFolderToSection(folder: Folder, sectionId: number | null, event: Event): void {
+    event.stopPropagation();
+    this.menuOpenId.set(null);
+    const dest = this.groups().find((g) => (g.section?.id ?? null) === sectionId);
+    this.foldersService.placeFolder(folder.id, sectionId, dest?.folders.length ?? 0);
   }
 
   async deleteFolder(folder: Folder, event: Event): Promise<void> {
@@ -175,9 +180,87 @@ export class SidebarComponent {
     this.menuOpenId.set(null);
   }
 
-  onReorderDropped(event: CdkDragDrop<Folder[]>): void {
-    this.foldersService.reorder(event.previousIndex, event.currentIndex);
+  /** A folder dropped within or between section lists. */
+  onFolderDropped(event: CdkDragDrop<FolderGroup, FolderGroup, Folder>): void {
+    const sectionId = event.container.data.section?.id ?? null;
+    const moved = event.container !== event.previousContainer || event.previousIndex !== event.currentIndex;
+    if (moved) this.foldersService.placeFolder(event.item.data.id, sectionId, event.currentIndex);
     setTimeout(() => (this.reordering = false));
+  }
+
+  /** Lists connected for drag: every group's list id. */
+  readonly groupListIds = (groups: FolderGroup[]) => groups.map((g) => this.groupListId(g));
+
+  groupListId(group: FolderGroup): string {
+    return group.section ? `folder-section-${group.section.id}` : 'folder-section-none';
+  }
+
+  createSection(): void {
+    if (this.creatingSection()) return;
+    this.creatingSection.set(true);
+    this.sectionRenameError.set(null);
+    this.foldersService.createSection().subscribe({
+      next: () => this.creatingSection.set(false),
+      error: () => this.creatingSection.set(false),
+    });
+  }
+
+  toggleSectionMenu(section: FolderSection, event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.menuOpenId.set(null);
+    this.sectionMenuOpenId.update((id) => (id === section.id ? null : section.id));
+  }
+
+  startSectionRename(section: FolderSection, event?: Event): void {
+    event?.stopPropagation();
+    this.sectionMenuOpenId.set(null);
+    this.sectionRenameError.set(null);
+    this.renamingSectionId.set(section.id);
+  }
+
+  commitSectionRename(section: FolderSection, value: string): void {
+    if (this.renamingSectionId() !== section.id || this.savingSectionRename) return;
+    const name = value.trim();
+    if (!name || name === section.name) {
+      this.cancelSectionRename();
+      return;
+    }
+    this.savingSectionRename = true;
+    this.foldersService.renameSection(section.id, name).subscribe({
+      next: () => {
+        this.savingSectionRename = false;
+        this.cancelSectionRename();
+      },
+      error: (err: Error) => {
+        this.savingSectionRename = false;
+        this.sectionRenameError.set(err.message);
+      },
+    });
+  }
+
+  cancelSectionRename(): void {
+    this.sectionRenameError.set(null);
+    this.renamingSectionId.set(null);
+  }
+
+  moveSection(section: FolderSection, delta: number, event: Event): void {
+    event.stopPropagation();
+    this.sectionMenuOpenId.set(null);
+    this.foldersService.nudgeSection(section.id, delta);
+  }
+
+  async deleteSection(section: FolderSection, event: Event): Promise<void> {
+    event.stopPropagation();
+    this.sectionMenuOpenId.set(null);
+    const ok = await this.confirm.ask({
+      title: `Delete section "${section.name}"?`,
+      message: 'Only the section goes away. Its folders and everything in them stay, ungrouped at the bottom.',
+      confirmLabel: 'Delete section',
+      danger: true,
+    });
+    if (!ok) return;
+    this.foldersService.removeSection(section.id).subscribe({ error: () => {} });
   }
 
   openFolder(folder: Folder): void {
@@ -188,109 +271,6 @@ export class SidebarComponent {
 
   isActiveFolder(folder: Folder): boolean {
     return this.currentPath() === `/folders/${folder.id}`;
-  }
-
-  createLocalMediaFolder(): void {
-    if (this.creatingLocalMedia()) return;
-    this.creatingLocalMedia.set(true);
-    this.localMediaRenameError.set(null);
-    this.localMediaService.createFolder().subscribe({
-      next: () => this.creatingLocalMedia.set(false),
-      error: () => this.creatingLocalMedia.set(false),
-    });
-  }
-
-  createLocalMediaFolderFromRail(): void {
-    this.expandSidebar.emit();
-    this.createLocalMediaFolder();
-  }
-
-  startLocalMediaRename(folder: LocalMediaFolder, event?: Event): void {
-    event?.stopPropagation();
-    this.localMediaMenuOpenId.set(null);
-    this.localMediaRenameError.set(null);
-    this.localMediaRenamingId.set(folder.id);
-  }
-
-  commitLocalMediaRename(folder: LocalMediaFolder, value: string): void {
-    if (this.localMediaRenamingId() !== folder.id || this.savingLocalMediaRename) return;
-    const name = value.trim();
-    if (!name || name === folder.name) {
-      this.cancelLocalMediaRename();
-      return;
-    }
-    this.savingLocalMediaRename = true;
-    this.localMediaService.renameFolder(folder.id, name).subscribe({
-      next: () => {
-        this.savingLocalMediaRename = false;
-        this.cancelLocalMediaRename();
-      },
-      error: (err: Error) => {
-        this.savingLocalMediaRename = false;
-        this.localMediaRenameError.set(err.message);
-      },
-    });
-  }
-
-  cancelLocalMediaRename(): void {
-    this.localMediaRenameError.set(null);
-    this.localMediaRenamingId.set(null);
-  }
-
-  toggleLocalMediaMenu(folder: LocalMediaFolder, event: Event): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.localMediaMenuOpenId.update((id) => (id === folder.id ? null : folder.id));
-  }
-
-  moveLocalMediaFolder(index: number, delta: number, event: Event): void {
-    event.stopPropagation();
-    this.localMediaMenuOpenId.set(null);
-    this.localMediaService.reorderFolders(index, index + delta);
-  }
-
-  async deleteLocalMediaFolder(folder: LocalMediaFolder, event: Event): Promise<void> {
-    event.stopPropagation();
-    this.localMediaMenuOpenId.set(null);
-    const items = folder.count === 1 ? '1 file' : `${folder.count} files`;
-    const ok = await this.confirm.ask({
-      title: `Delete "${folder.name}"?`,
-      message:
-        folder.count > 0
-          ? `This deletes the folder and its ${items} from Local media.`
-          : 'This folder is empty.',
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (!ok) return;
-    this.localMediaService.removeFolder(folder.id).subscribe({
-      next: () => {
-        if (this.router.url.split('?')[0] === `/local-media/${folder.id}`) {
-          this.router.navigate(['/camera']);
-        }
-      },
-      error: () => {},
-    });
-  }
-
-  onLocalMediaReorderStarted(): void {
-    this.localMediaReordering = true;
-    this.localMediaMenuOpenId.set(null);
-  }
-
-  onLocalMediaReorderDropped(event: CdkDragDrop<LocalMediaFolder[]>): void {
-    this.localMediaService.reorderFolders(event.previousIndex, event.currentIndex);
-    setTimeout(() => (this.localMediaReordering = false));
-  }
-
-  openLocalMediaFolder(folder: LocalMediaFolder): void {
-    if (this.localMediaReordering || this.localMediaRenamingId() === folder.id) return;
-    this.router.navigate(['/local-media', folder.id]);
-    this.onNavLinkClick();
-  }
-
-  isActiveLocalMediaFolder(folder: LocalMediaFolder): boolean {
-    return this.currentPath() === `/local-media/${folder.id}`;
   }
 
   isActiveBin(): boolean {
@@ -331,6 +311,15 @@ export class SidebarComponent {
   createFolderFromRail(): void {
     this.expandSidebar.emit();
     this.createFolder();
+  }
+
+  isFirstSection(section: FolderSection): boolean {
+    return this.sections()[0]?.id === section.id;
+  }
+
+  isLastSection(section: FolderSection): boolean {
+    const list = this.sections();
+    return list[list.length - 1]?.id === section.id;
   }
 
   onNavLinkClick(): void {

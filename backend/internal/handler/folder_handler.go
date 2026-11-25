@@ -28,6 +28,19 @@ func NewFolderHandler(folders *repository.FolderRepo, saves *repository.SaveRepo
 
 type folderNameRequest struct {
 	Name string `json:"name"`
+	// SectionID puts a new folder straight into a sidebar section (create only).
+	SectionID *int64 `json:"section_id"`
+}
+
+type folderLayoutRequest struct {
+	Sections []int64                       `json:"sections"`
+	Folders  []repository.FolderLayoutItem `json:"folders"`
+}
+
+// sidebarJSON is everything the sidebar needs to draw folders and sections.
+type sidebarJSON struct {
+	Sections any `json:"sections"`
+	Folders  any `json:"folders"`
 }
 
 type folderOrderRequest struct {
@@ -73,9 +86,12 @@ func writeFolderError(w http.ResponseWriter, err error, action string, userID in
 		utils.WriteError(w, http.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, repository.ErrSaveNotFound):
 		utils.WriteError(w, http.StatusNotFound, err.Error(), nil)
-	case errors.Is(err, repository.ErrFolderNameTaken):
+	case errors.Is(err, repository.ErrSectionNotFound):
+		utils.WriteError(w, http.StatusNotFound, err.Error(), nil)
+	case errors.Is(err, repository.ErrFolderNameTaken), errors.Is(err, repository.ErrSectionNameTaken):
 		utils.WriteError(w, http.StatusConflict, err.Error(), nil)
-	case errors.Is(err, repository.ErrFolderNameInvalid), errors.Is(err, repository.ErrTooManyFolders), errors.Is(err, repository.ErrFolderOrder), errors.Is(err, repository.ErrSaveOrder):
+	case errors.Is(err, repository.ErrFolderNameInvalid), errors.Is(err, repository.ErrTooManyFolders), errors.Is(err, repository.ErrFolderOrder), errors.Is(err, repository.ErrSaveOrder),
+		errors.Is(err, repository.ErrTooManySections), errors.Is(err, repository.ErrFolderLayout):
 		utils.WriteError(w, http.StatusBadRequest, err.Error(), nil)
 	default:
 		slog.Error(action+" failed", "user_id", userID, "err", err)
@@ -115,7 +131,7 @@ func (h *FolderHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 && !decode(w, r, &req) {
 		return
 	}
-	folder, err := h.folders.Create(r.Context(), userID, req.Name)
+	folder, err := h.folders.Create(r.Context(), userID, req.Name, req.SectionID)
 	if writeFolderError(w, err, "create folder", userID) {
 		return
 	}
@@ -170,6 +186,89 @@ func (h *FolderHandler) Reorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.WriteSuccess(w, folders)
+}
+
+// Sidebar returns the user's sections and folders (folders carry section_id).
+func (h *FolderHandler) Sidebar(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := userAndID(w, r, "")
+	if !ok {
+		return
+	}
+	h.writeSidebar(w, r, userID)
+}
+
+func (h *FolderHandler) writeSidebar(w http.ResponseWriter, r *http.Request, userID int64) {
+	sections, err := h.folders.ListSections(r.Context(), userID)
+	if writeFolderError(w, err, "list sections", userID) {
+		return
+	}
+	folders, err := h.folders.List(r.Context(), userID)
+	if writeFolderError(w, err, "list folders", userID) {
+		return
+	}
+	utils.WriteSuccess(w, sidebarJSON{Sections: sections, Folders: folders})
+}
+
+// SetLayout saves section order plus every folder's section and position.
+func (h *FolderHandler) SetLayout(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := userAndID(w, r, "")
+	if !ok {
+		return
+	}
+	var req folderLayoutRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if writeFolderError(w, h.folders.SetLayout(r.Context(), userID, req.Sections, req.Folders), "save folder layout", userID) {
+		return
+	}
+	h.writeSidebar(w, r, userID)
+}
+
+// CreateSection adds a sidebar section; an empty name becomes the next free "Section N".
+func (h *FolderHandler) CreateSection(w http.ResponseWriter, r *http.Request) {
+	userID, _, ok := userAndID(w, r, "")
+	if !ok {
+		return
+	}
+	var req folderNameRequest
+	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	section, err := h.folders.CreateSection(r.Context(), userID, req.Name)
+	if writeFolderError(w, err, "create section", userID) {
+		return
+	}
+	utils.WriteJSON(w, http.StatusCreated, utils.APIResponse{Status: "SUCCESS", Data: section})
+}
+
+// RenameSection changes a section's name.
+func (h *FolderHandler) RenameSection(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := userAndID(w, r, "id")
+	if !ok {
+		return
+	}
+	var req folderNameRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	section, err := h.folders.RenameSection(r.Context(), userID, id, req.Name)
+	if writeFolderError(w, err, "rename section", userID) {
+		return
+	}
+	utils.WriteSuccess(w, section)
+}
+
+// DeleteSection removes a section; its folders stay, ungrouped.
+func (h *FolderHandler) DeleteSection(w http.ResponseWriter, r *http.Request) {
+	userID, id, ok := userAndID(w, r, "id")
+	if !ok {
+		return
+	}
+	if writeFolderError(w, h.folders.DeleteSection(r.Context(), userID, id), "delete section", userID) {
+		return
+	}
+	h.writeSidebar(w, r, userID)
 }
 
 // ListSaves returns the saves in a folder (same shape as GET /api/dump).

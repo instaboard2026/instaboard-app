@@ -17,7 +17,6 @@ import {
   CardDragService,
   SplitExportDrag,
   isCalendarDrop,
-  isLocalMediaDrop,
   isSplitDrop,
 } from '../../services/card-drag.service';
 import { DumpService, MoveTarget, Save } from '../../services/dump.service';
@@ -288,7 +287,7 @@ export class SplitPageComponent {
     this.cardDrag.hoverTarget.set(null);
     this.playback.dragPause.set(false);
 
-    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target) || isLocalMediaDrop(target)) {
+    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target)) {
       return;
     }
     const scope = target as MoveTarget;
@@ -306,7 +305,7 @@ export class SplitPageComponent {
   /** Home/folder only — Bin, calendar, Split, and Local media are not export targets. */
   private resolveFolderDropTarget(x: number, y: number) {
     const target = this.cardDrag.targetAt(x, y);
-    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target) || isLocalMediaDrop(target)) {
+    if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target)) {
       return null;
     }
     return target;

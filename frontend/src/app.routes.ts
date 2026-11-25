@@ -28,12 +28,7 @@ export const AppRoutes: Routes = [
       .then(c => c.CameraPageComponent),
     title: 'Instaboard - Manage camera'
   },
-  {
-    path: 'local-media/:id',
-    loadComponent: () => import('./app/features/adaptive/pages/local-media-page/local-media-page.component')
-      .then(c => c.LocalMediaPageComponent),
-    title: 'Instaboard - Local media'
-  },
+  { path: 'local-media/:id', redirectTo: 'home' },
   {
     path: 'folders/:id',
     loadComponent: () => import('./app/features/adaptive/pages/dump-page/dump-page.component')

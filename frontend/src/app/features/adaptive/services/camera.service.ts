@@ -44,6 +44,8 @@ export interface CameraItem {
   url: string;
   thumb_url: string;
   copied: boolean;
+  /** Video length in ms once its thumbnail exists (absent = not known yet). */
+  duration_ms?: number;
 }
 
 export interface CameraDeleteResult {
@@ -221,6 +223,18 @@ export class CameraService {
         if (!res.data) throw new Error(res.message || 'Could not delete files');
         return res.data;
       }),
+      catchError((err) => throwError(() => this.toError(err))),
+    );
+  }
+
+  /** Open the Mac's AirDrop window for card files, read in place (no browser copy). */
+  airDrop(relPaths: string[]): Observable<void> {
+    return this.http.post<ApiWrapper<{ files: number }>>(`${environment.apiUrl}/api/camera/airdrop`, {
+      rel_paths: relPaths,
+    }, {
+      headers: this.authHeaders(),
+    }).pipe(
+      map(() => undefined),
       catchError((err) => throwError(() => this.toError(err))),
     );
   }
