@@ -71,7 +71,9 @@ type cameraStatusJSON struct {
 	ImageCount   int    `json:"image_count"`
 	JunkCount    int    `json:"junk_count"`
 	FreeBytes    uint64 `json:"free_bytes,omitempty"`
-	TotalBytes   uint64 `json:"total_bytes,omitempty"`
+	// Ejectable is true when the folder is on a connected external card/drive (Safely eject shows).
+	Ejectable  bool   `json:"ejectable"`
+	TotalBytes uint64 `json:"total_bytes,omitempty"`
 }
 
 type cameraItemJSON struct {
@@ -140,6 +142,7 @@ func (h *CameraHandler) Status(w http.ResponseWriter, r *http.Request) {
 		AllCount: all, VideoCount: video, ImageCount: image, JunkCount: junk,
 	}
 	if available {
+		out.Ejectable = service.VolumeMountPoint(cr.Root) != ""
 		if ds, err := service.DiskSpaceForPath(cr.Root); err == nil {
 			out.FreeBytes = ds.FreeBytes
 			out.TotalBytes = ds.TotalBytes
@@ -450,6 +453,42 @@ func writeAirDrop(w http.ResponseWriter, paths []string) {
 	utils.WriteSuccess(w, map[string]int{"files": len(paths)})
 }
 
+// Eject safely ejects the card that holds the camera folder. The folder and index are kept,
+// so plugging the card back in shows the same files again.
+func (h *CameraHandler) Eject(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	cr, err := h.settings.GetCameraRoot(r.Context(), userID)
+	if err != nil || !cr.HasRoot {
+		utils.WriteError(w, http.StatusNotFound, "no camera folder chosen yet", nil)
+		return
+	}
+	if !service.CameraRootAvailable(cr.Root) {
+		utils.WriteError(w, http.StatusConflict, "the card is already disconnected", nil)
+		return
+	}
+	if h.scanner.IsBusy(userID) {
+		utils.WriteError(w, http.StatusConflict, "wait for the scan to finish, then eject", nil)
+		return
+	}
+	mount := service.VolumeMountPoint(cr.Root)
+	if err := service.EjectVolume(r.Context(), mount); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrNotRemovable) {
+			status = http.StatusBadRequest
+		} else if errors.Is(err, service.ErrVolumeBusy) {
+			status = http.StatusConflict
+		}
+		slog.Warn("eject card failed", "mount", mount, "err", err)
+		utils.WriteError(w, status, err.Error(), nil)
+		return
+	}
+	utils.WriteSuccess(w, map[string]string{"ejected": filepath.Base(mount)})
+}
+
 // ClearRoot forgets the saved camera path and index.
 func (h *CameraHandler) ClearRoot(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromContext(r.Context())
@@ -486,7 +525,7 @@ func (h *CameraHandler) Media(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	serveFile(w, r, path)
+	serveCardFile(w, r, path)
 }
 
 // Thumb serves a JPEG thumbnail (generated + cached) for a camera file.
@@ -524,7 +563,7 @@ func (h *CameraHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("camera thumb failed", "file", file, "err", err)
 		// Fall back to original for images so the tile is not blank.
 		if service.MediaType(file) == "image" {
-			serveFile(w, r, src)
+			serveCardFile(w, r, src)
 			return
 		}
 		http.Error(w, "thumbnail unavailable", http.StatusNotFound)
@@ -536,6 +575,25 @@ func (h *CameraHandler) Thumb(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	serveFile(w, r, thumb)
+}
+
+// serveCardFile serves a file straight from the camera card, tracked so Eject can cut it off.
+func serveCardFile(w http.ResponseWriter, r *http.Request, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	untrack := service.TrackCardFile(f)
+	defer untrack()
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeContent(w, r, filepath.Base(path), fi.ModTime(), f)
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request, path string) {

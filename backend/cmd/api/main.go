@@ -139,6 +139,7 @@ func main() {
 			r.Get("/camera/items", cameraHandler.Items)
 			r.Post("/camera/delete", cameraHandler.Delete)
 			r.Post("/camera/airdrop", cameraHandler.AirDrop)
+			r.Post("/camera/eject", cameraHandler.Eject)
 			r.Post("/camera/copy", cameraCopyHandler.Start)
 			r.Get("/camera/copy-jobs/{id}", cameraCopyHandler.Job)
 			r.Delete("/camera/root", cameraHandler.ClearRoot)

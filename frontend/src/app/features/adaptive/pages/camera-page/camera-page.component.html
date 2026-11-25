@@ -6,7 +6,7 @@
           <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">photo_camera</span>
           <span class="truncate">Manage camera</span>
         </h1>
-        @if (isLoggedIn() && count() > 0) {
+        @if (isLoggedIn() && count() > 0 && !needsReconnect()) {
           <span class="shrink-0 text-sm text-ink-secondary dark:text-slate-400">
             {{ count() }} {{ count() === 1 ? 'file' : 'files' }}
           </span>
@@ -26,7 +26,7 @@
       </div>
       <div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
         @if (isLoggedIn()) {
-          @if (total() > 0 || scanning()) {
+          @if ((total() > 0 || scanning()) && !needsReconnect()) {
             <button
               type="button"
               (click)="refresh()"
@@ -35,6 +35,17 @@
               aria-label="Refresh"
               class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-[#d0d0d0] bg-white text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 disabled:opacity-50">
               <span class="material-icons-outlined !text-lg">refresh</span>
+            </button>
+          }
+          @if (canEject()) {
+            <button
+              type="button"
+              (click)="ejectCard()"
+              [disabled]="ejecting() || copying() || scanning()"
+              [title]="copying() ? 'Wait for the copy to finish' : scanning() ? 'Wait for the scan to finish' : 'Safely eject the card'"
+              class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-semibold text-ink whitespace-nowrap hover:bg-[#f1f1f1] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">eject</span>
+              {{ ejecting() ? 'Ejecting…' : 'Safely eject' }}
             </button>
           }
           <button
@@ -74,12 +85,12 @@
 
   @if (!isLoggedIn()) {
     <p class="py-10 text-center text-sm text-ink-secondary dark:text-slate-400">Sign in to manage your camera.</p>
-  } @else if (needsReconnect() && total() === 0 && !scanning()) {
+  } @else if (needsReconnect() && !scanning()) {
     <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
       <span class="material-icons-outlined !text-4xl text-ink-secondary dark:text-slate-500">sd_card_alert</span>
       <p class="mt-3 text-sm font-medium">Card not available</p>
       <p class="mt-1 max-w-sm text-xs text-ink-secondary dark:text-slate-400">
-        Last used: {{ label() || 'camera folder' }}. Plug it in again, then reconnect.
+        Last used: {{ label() || 'camera folder' }}. Plug it in again — it opens here by itself, or click Reconnect card.
       </p>
       <button type="button" (click)="openFolder()" class="mt-4 h-8 px-3 rounded-[10px] bg-[#303030] text-sm font-semibold text-white dark:bg-white dark:text-ink">
         Reconnect card

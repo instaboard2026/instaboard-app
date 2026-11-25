@@ -109,7 +109,14 @@
             </button>
           </div>
 
-          <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
+          <!-- Drop list (sorting off) so tiles drag like folder cards: chip preview, placeholder, glide back. -->
+          <div
+            class="grid gap-4"
+            [class]="gridClass"
+            [style.--per-row]="perRow()"
+            cdkDropList
+            cdkDropListOrientation="mixed"
+            [cdkDropListSortingDisabled]="true">
             @let masterTile = masterDragData(board);
             <div
               cdkDrag
@@ -142,7 +149,7 @@
                   <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
                 </span>
               </div>
-              <div *cdkDragPlaceholder class="h-full min-h-[120px] rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
+              <div *cdkDragPlaceholder class="aspect-[9/16] w-full rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
             </div>
 
             @for (clip of board.clips ?? []; track clip.id) {
@@ -178,7 +185,7 @@
                     <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
                   </span>
                 </div>
-                <div *cdkDragPlaceholder class="h-full min-h-[120px] rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
+                <div *cdkDragPlaceholder class="aspect-[9/16] w-full rounded-2xl border-2 border-dashed border-blue-400/50 bg-blue-500/5"></div>
               </div>
             }
           </div>

@@ -8,7 +8,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Subscription, firstValueFrom, takeWhile } from 'rxjs';
+import { Subscription, catchError, firstValueFrom, interval, of, switchMap, takeWhile } from 'rxjs';
 import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import {
   CameraItem,
@@ -93,6 +93,9 @@ export class CameraPageComponent implements OnDestroy {
   readonly lastClicked = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
   readonly opening = signal(false);
+  readonly ejecting = signal(false);
+  private cardWatch: Subscription | null = null;
+  readonly canEject = computed(() => !!this.status()?.ejectable);
   readonly deleting = signal(false);
   readonly sharing = signal(false);
   readonly copying = this.cameraCopy.copying;
@@ -185,7 +188,8 @@ export class CameraPageComponent implements OnDestroy {
     if (this.user.isLoggedIn()) {
       this.camera.loadStatus().subscribe({
         next: (s) => {
-          if (s.available || s.has_root) {
+          this.watchCard();
+          if (s.available) {
             this.reloadPage(0).subscribe({
               next: () => {
                 if (s.scan === 'running' || this.camera.scanning()) this.startScanPoll();
@@ -199,7 +203,31 @@ export class CameraPageComponent implements OnDestroy {
     }
   }
 
+  /**
+   * Checks every few seconds whether the card is still there: pulled out → tiles disappear;
+   * plugged back in → its files load again without clicking anything.
+   */
+  private watchCard(): void {
+    this.cardWatch?.unsubscribe();
+    let wasAvailable = !!this.status()?.available;
+    this.cardWatch = interval(4000)
+      .pipe(switchMap(() => this.camera.loadStatus().pipe(catchError(() => of(null)))))
+      .subscribe((s) => {
+        if (!s || !s.has_root) return;
+        if (wasAvailable && !s.available) {
+          this.closePreview();
+          this.selected.set(new Set());
+          this.camera.items.set([]);
+        } else if (!wasAvailable && s.available) {
+          this.notice.set(null);
+          this.reloadPage(0).subscribe({ error: () => {} });
+        }
+        wasAvailable = s.available;
+      });
+  }
+
   ngOnDestroy(): void {
+    this.cardWatch?.unsubscribe();
     this.scanSub?.unsubscribe();
     this.playback.previewPause.set(false);
   }
@@ -267,6 +295,28 @@ export class CameraPageComponent implements OnDestroy {
         this.notice.set(err.message);
       },
     });
+  }
+
+  /** Stops everything reading the card (players, autoplay), then ejects it like Finder does. */
+  async ejectCard(): Promise<void> {
+    if (this.ejecting() || this.copying() || this.scanning()) return;
+    this.ejecting.set(true);
+    this.notice.set(null);
+    this.closePreview();
+    this.playback.previewPause.set(true);
+    // Give the browser a moment to drop its open video streams from the card.
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const name = await firstValueFrom(this.camera.eject());
+      this.selected.set(new Set());
+      this.notice.set(`"${name}" was ejected. It's safe to remove the card.`);
+      this.camera.loadStatus().subscribe({ error: () => {} });
+    } catch (err) {
+      this.notice.set(err instanceof Error ? err.message : 'Could not eject the card.');
+    } finally {
+      this.playback.previewPause.set(false);
+      this.ejecting.set(false);
+    }
   }
 
   refresh(): void {

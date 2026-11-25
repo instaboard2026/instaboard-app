@@ -31,6 +31,8 @@ export interface CameraStatus {
   video_count: number;
   image_count: number;
   junk_count: number;
+  /** True when the folder is on a connected card or external drive (shows Safely eject). */
+  ejectable?: boolean;
   free_bytes?: number;
   total_bytes?: number;
 }
@@ -265,6 +267,22 @@ export class CameraService {
     }).pipe(
       map(() => undefined),
       tap(() => this.clear()),
+      catchError((err) => throwError(() => this.toError(err))),
+    );
+  }
+
+  /** Safely ejects the card that holds the camera folder (folder and index are kept). */
+  eject(): Observable<string> {
+    return this.http.post<ApiWrapper<{ ejected: string }>>(`${environment.apiUrl}/api/camera/eject`, {}, {
+      headers: this.authHeaders(),
+    }).pipe(
+      map((res) => res.data?.ejected ?? 'Card'),
+      // The card is gone: drop its tiles so nothing tries to load from it (they come back on reconnect).
+      tap(() => {
+        this.items.set([]);
+        this.total.set(0);
+        this.pageIndex.set(0);
+      }),
       catchError((err) => throwError(() => this.toError(err))),
     );
   }

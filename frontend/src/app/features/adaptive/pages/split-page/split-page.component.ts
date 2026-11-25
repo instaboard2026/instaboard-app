@@ -7,7 +7,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview } from '@angular/cdk/drag-drop';
+import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import { RouterLink } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -34,7 +34,7 @@ type SplitTileDrag = SplitExportDrag & { label: string };
 @Component({
   selector: 'app-split-page',
   standalone: true,
-  imports: [RouterLink, AutoplayVideoDirective, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
+  imports: [RouterLink, AutoplayVideoDirective, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './split-page.component.html',
 })
@@ -302,7 +302,7 @@ export class SplitPageComponent {
     });
   }
 
-  /** Home/folder only — Bin, calendar, Split, and Local media are not export targets. */
+  /** Home/folder only — Bin, calendar and Split are not export targets. */
   private resolveFolderDropTarget(x: number, y: number) {
     const target = this.cardDrag.targetAt(x, y);
     if (target === null || target === 'bin' || isCalendarDrop(target) || isSplitDrop(target)) {
