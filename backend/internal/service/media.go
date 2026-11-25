@@ -202,3 +202,51 @@ func (m *MediaSigner) VerifyCameraThumb(userID int64, file, expStr, sig string) 
 	}
 	return hmac.Equal([]byte(sig), []byte(m.cameraThumbSignature(userID, file, exp)))
 }
+
+func (m *MediaSigner) cardTrashSignature(userID, id, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/card-trash-thumb/%d/%d/%d", userID, id, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// CardTrashThumbURL returns a signed URL for the thumbnail of a camera file that is in the Bin.
+func (m *MediaSigner) CardTrashThumbURL(userID, id int64) string {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.cardTrashSignature(userID, id, exp))
+	return fmt.Sprintf("%s/media/card-trash-thumb/%d/%d?%s", m.baseURL, userID, id, q.Encode())
+}
+
+// VerifyCardTrashThumb checks a Bin card-file thumbnail URL.
+func (m *MediaSigner) VerifyCardTrashThumb(userID, id int64, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.cardTrashSignature(userID, id, exp)))
+}
+
+func (m *MediaSigner) cardTrashMediaSignature(userID, id, exp int64) string {
+	mac := hmac.New(sha256.New, m.secret)
+	fmt.Fprintf(mac, "media/card-trash/%d/%d/%d", userID, id, exp)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// CardTrashURL returns a signed URL that streams a card file that is in the Bin.
+func (m *MediaSigner) CardTrashURL(userID, id int64) string {
+	exp := time.Now().Add(m.ttl).Unix()
+	q := url.Values{}
+	q.Set("exp", strconv.FormatInt(exp, 10))
+	q.Set("sig", m.cardTrashMediaSignature(userID, id, exp))
+	return fmt.Sprintf("%s/media/card-trash/%d/%d?%s", m.baseURL, userID, id, q.Encode())
+}
+
+// VerifyCardTrash checks a Bin card-file media URL.
+func (m *MediaSigner) VerifyCardTrash(userID, id int64, expStr, sig string) bool {
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	return hmac.Equal([]byte(sig), []byte(m.cardTrashMediaSignature(userID, id, exp)))
+}

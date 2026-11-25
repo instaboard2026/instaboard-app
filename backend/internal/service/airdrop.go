@@ -21,6 +21,12 @@ var ErrAirDropUnavailable = errors.New("AirDrop is not available on this Mac —
 // Nothing is copied: AirDrop reads the files straight from their paths. It returns once the
 // window is up; the helper process keeps running until the user sends or cancels.
 func OpenAirDrop(paths []string) error {
+	return OpenAirDropThen(paths, nil)
+}
+
+// OpenAirDropThen is OpenAirDrop plus onDone(sent), called once the user finishes in the AirDrop
+// window: sent is true only when macOS reports the files were shared (false on cancel or error).
+func OpenAirDropThen(paths []string, onDone func(sent bool)) error {
 	if runtime.GOOS != "darwin" {
 		return ErrAirDropUnavailable
 	}
@@ -49,12 +55,19 @@ func OpenAirDrop(paths []string) error {
 			slog.Error("airdrop helper failed", "err", err, "out", res)
 			return errors.New("could not open AirDrop")
 		}
+		if onDone != nil {
+			go onDone(res == "shared")
+		}
 		return nil
 	case <-time.After(1500 * time.Millisecond):
 		// Window is showing; log the outcome when the user finishes.
 		go func() {
 			<-exited
-			slog.Info("airdrop finished", "files", len(paths), "result", strings.TrimSpace(out.String()))
+			res := strings.TrimSpace(out.String())
+			slog.Info("airdrop finished", "files", len(paths), "result", res)
+			if onDone != nil {
+				onDone(res == "shared")
+			}
 		}()
 		return nil
 	}

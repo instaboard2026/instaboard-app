@@ -26,6 +26,8 @@ type CameraHandler struct {
 	index      *repository.CameraIndexRepo
 	scanner    *service.CameraScanner
 	media      *service.MediaSigner
+	tray       *repository.AirDropTrayRepo
+	trash      *repository.CameraTrashRepo
 	defaultDir string
 }
 
@@ -74,6 +76,9 @@ type cameraStatusJSON struct {
 	// Ejectable is true when the folder is on a connected external card/drive (Safely eject shows).
 	Ejectable  bool   `json:"ejectable"`
 	TotalBytes uint64 `json:"total_bytes,omitempty"`
+	// AirDropCount is how many files are in the card's AIRDROP/ folder; AirDropSending while its window is open.
+	AirDropCount   int  `json:"airdrop_count"`
+	AirDropSending bool `json:"airdrop_sending"`
 }
 
 type cameraItemJSON struct {
@@ -85,6 +90,8 @@ type cameraItemJSON struct {
 	URL      string `json:"url"`
 	ThumbURL string `json:"thumb_url"`
 	Copied   bool   `json:"copied"`
+	// Sent is true once the file was AirDropped.
+	Sent bool `json:"sent"`
 	// DurationMs is the video length once its thumbnail has been made (0 = not known yet).
 	DurationMs int64 `json:"duration_ms,omitempty"`
 }
@@ -132,7 +139,16 @@ func (h *CameraHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if h.scanner.IsBusy(userID) && meta.Status != "running" {
 		meta.Status = "running"
 	}
-	all, video, image, junk, _ := h.index.KindCounts(r.Context(), userID)
+	scope := repository.ScopeMain
+	if r.URL.Query().Get("folder") == repository.ScopeAirDrop {
+		scope = repository.ScopeAirDrop
+	}
+	all, video, image, junk, _ := h.index.KindCounts(r.Context(), userID, scope)
+	airdropCount, _ := h.index.CountByKind(r.Context(), userID, "all", repository.ScopeAirDrop)
+	sending := false
+	if v, ok := airdropSending.Load(userID); ok {
+		sending = v.(bool)
+	}
 	available := cr.HasRoot && service.CameraRootAvailable(cr.Root)
 	out := cameraStatusJSON{
 		Root: cr.Root, Label: cr.Label, OpenedAt: cr.OpenedAt,
@@ -140,6 +156,7 @@ func (h *CameraHandler) Status(w http.ResponseWriter, r *http.Request) {
 		Scan: meta.Status, IndexedCount: meta.IndexedCount,
 		Truncated: meta.Truncated, TimedOut: meta.TimedOut, ScanError: meta.ErrorMessage,
 		AllCount: all, VideoCount: video, ImageCount: image, JunkCount: junk,
+		AirDropCount: airdropCount, AirDropSending: sending,
 	}
 	if available {
 		out.Ejectable = service.VolumeMountPoint(cr.Root) != ""
@@ -259,7 +276,11 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 		meta.Status = "running"
 	}
 
-	total, err := h.index.CountByKind(r.Context(), userID, kind)
+	scope := repository.ScopeMain
+	if q.Get("folder") == repository.ScopeAirDrop {
+		scope = repository.ScopeAirDrop
+	}
+	total, err := h.index.CountByKind(r.Context(), userID, kind, scope)
 	if err != nil {
 		slog.Error("count camera index failed", "err", err)
 		utils.WriteError(w, http.StatusInternalServerError, "could not load camera items", nil)
@@ -268,9 +289,9 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 
 	var rows []repository.CameraIndexRow
 	if useOffset {
-		rows, err = h.index.ListOffset(r.Context(), userID, kind, offset, limit, sort)
+		rows, err = h.index.ListOffset(r.Context(), userID, kind, offset, limit, sort, scope)
 	} else {
-		rows, err = h.index.ListPage(r.Context(), userID, kind, cursor, limit)
+		rows, err = h.index.ListPage(r.Context(), userID, kind, cursor, limit, scope)
 	}
 	if err != nil {
 		slog.Error("list camera index failed", "err", err)
@@ -285,6 +306,10 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dir := h.downloadDir(r, userID)
+	sentNames := map[string]bool{}
+	if h.tray != nil {
+		sentNames, _ = h.tray.SentNames(r.Context(), userID)
+	}
 	items := make([]cameraItemJSON, 0, len(rows))
 	for _, row := range rows {
 		full := ""
@@ -302,6 +327,7 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 			URL:        full,
 			ThumbURL:   thumb,
 			Copied:     copied[row.Name],
+			Sent:       sentNames[row.Name],
 			DurationMs: service.CameraVideoDurationMs(dir, userID, "", row.RelPath, row.ByteSize, row.MtimeNs, false),
 		})
 	}
@@ -323,6 +349,8 @@ func (h *CameraHandler) Items(w http.ResponseWriter, r *http.Request) {
 
 type cameraDeleteBody struct {
 	RelPaths []string `json:"rel_paths"`
+	// Trash moves the files to the Mac's Trash (can be put back) instead of deleting them for good.
+	Trash bool `json:"trash"`
 }
 
 type cameraDeleteResultJSON struct {
@@ -362,6 +390,8 @@ func (h *CameraHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	okPaths := make([]string, 0, len(body.RelPaths))
 	failed := make([]string, 0)
+	var toTrash []string
+	relOf := map[string]string{}
 	seen := make(map[string]struct{}, len(body.RelPaths))
 	for _, rel := range body.RelPaths {
 		rel = filepath.ToSlash(strings.TrimSpace(rel))
@@ -382,12 +412,63 @@ func (h *CameraHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			failed = append(failed, rel)
 			continue
 		}
+		if body.Trash {
+			toTrash = append(toTrash, path)
+			relOf[path] = rel
+			continue
+		}
 		if err := os.Remove(path); err != nil {
 			slog.Warn("camera delete failed", "path", rel, "err", err)
 			failed = append(failed, rel)
 			continue
 		}
 		okPaths = append(okPaths, rel)
+	}
+	if len(toTrash) > 0 {
+		rels := make([]string, 0, len(toTrash))
+		for _, p := range toTrash {
+			rels = append(rels, relOf[p])
+		}
+		indexed, _ := h.index.GetByRelPaths(r.Context(), userID, rels)
+		info := map[string]repository.CameraIndexRow{}
+		for _, row := range indexed {
+			info[row.RelPath] = row
+		}
+		moved, notMoved, err := service.MoveToTrashTracked(toTrash)
+		if err != nil {
+			slog.Warn("camera move to trash failed", "err", err)
+		}
+		// Remember them so the Bin can list, put back, or delete them for good.
+		for p, trashPath := range moved {
+			rel := relOf[p]
+			row, ok := info[rel]
+			if !ok {
+				row = repository.CameraIndexRow{RelPath: rel, Name: filepath.Base(p), Kind: service.MediaType(p)}
+			}
+			if h.trash != nil {
+				if err := h.trash.Add(r.Context(), userID, repository.CardTrashItem{
+					RelPath: rel, Name: row.Name, Kind: row.Kind, ByteSize: row.ByteSize, MtimeNs: row.MtimeNs,
+					CardRoot: cr.Root, TrashPath: trashPath,
+				}); err != nil {
+					slog.Warn("record trashed card file failed", "file", rel, "err", err)
+				}
+			}
+		}
+		skip := map[string]bool{}
+		for _, p := range notMoved {
+			skip[p] = true
+			failed = append(failed, relOf[p])
+		}
+		for _, p := range toTrash {
+			if !skip[p] {
+				okPaths = append(okPaths, relOf[p])
+			}
+		}
+	}
+	if h.tray != nil {
+		for _, p := range okPaths {
+			_ = h.tray.ForgetOrigin(r.Context(), userID, p)
+		}
 	}
 	if len(okPaths) > 0 {
 		if _, err := h.index.DeleteByRelPaths(r.Context(), userID, okPaths); err != nil {

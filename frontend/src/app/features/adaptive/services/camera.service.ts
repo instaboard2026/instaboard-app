@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable, catchError, map, of, switchMap, tap, throwError, timer } from 'rxjs';
+import { Observable, Subscription, catchError, map, of, switchMap, tap, throwError, timer } from 'rxjs';
 import { environment } from 'environments';
 import { AuthTokenService } from './auth-token.service';
 
@@ -33,8 +33,19 @@ export interface CameraStatus {
   junk_count: number;
   /** True when the folder is on a connected card or external drive (shows Safely eject). */
   ejectable?: boolean;
+  /** Files in the card's AIRDROP folder, and whether its AirDrop window is open. */
+  airdrop_count?: number;
+  airdrop_sending?: boolean;
   free_bytes?: number;
   total_bytes?: number;
+}
+
+export type CameraFolder = 'main' | 'airdrop';
+
+export interface AirDropMoveResult {
+  moved: number;
+  already: number;
+  failed?: string[];
 }
 
 export interface CameraItem {
@@ -46,6 +57,8 @@ export interface CameraItem {
   url: string;
   thumb_url: string;
   copied: boolean;
+  /** Already AirDropped once. */
+  sent?: boolean;
   /** Video length in ms once its thumbnail exists (absent = not known yet). */
   duration_ms?: number;
 }
@@ -84,6 +97,9 @@ export class CameraService {
 
   readonly status = signal<CameraStatus | null>(null);
   readonly items = signal<CameraItem[]>([]);
+  /** Which part of the card the grid shows: everything else ('main') or the AIRDROP folder. */
+  readonly folder = signal<CameraFolder>('main');
+  private watchSub: Subscription | null = null;
   readonly root = signal<string | null>(null);
   readonly label = signal<string | null>(null);
   readonly truncated = signal(false);
@@ -114,6 +130,7 @@ export class CameraService {
     }
     return this.http.get<ApiWrapper<CameraStatus>>(`${environment.apiUrl}/api/camera/status`, {
       headers: this.authHeaders(),
+      params: { folder: this.folder() },
     }).pipe(
       map((res) => res.data ?? {
         available: false, has_root: false, scan: 'idle' as const,
@@ -215,9 +232,11 @@ export class CameraService {
     );
   }
 
-  deleteFiles(relPaths: string[]): Observable<CameraDeleteResult> {
+  /** Deletes card files for good, or with `trash` moves them to the Mac's Trash (can be put back). */
+  deleteFiles(relPaths: string[], trash = false): Observable<CameraDeleteResult> {
     return this.http.post<ApiWrapper<CameraDeleteResult>>(`${environment.apiUrl}/api/camera/delete`, {
       rel_paths: relPaths,
+      trash,
     }, {
       headers: this.authHeaders(),
     }).pipe(
@@ -287,6 +306,46 @@ export class CameraService {
     );
   }
 
+  /** Polls card status every few seconds (shared by the sidebar and the camera page). */
+  watch(): void {
+    if (this.watchSub) return;
+    this.watchSub = timer(0, 4000)
+      .pipe(switchMap(() => (this.authToken.getToken() ? this.loadStatus().pipe(catchError(() => of(null))) : of(null))))
+      .subscribe();
+  }
+
+  /** Moves card files into the card's AIRDROP folder. */
+  addToAirDrop(relPaths: string[]): Observable<AirDropMoveResult> {
+    return this.postData<AirDropMoveResult>('/api/camera/airdrop-folder/add', { rel_paths: relPaths });
+  }
+
+  /** Moves files from AIRDROP back to where they were on the card. */
+  moveBackFromAirDrop(relPaths: string[]): Observable<AirDropMoveResult> {
+    return this.postData<AirDropMoveResult>('/api/camera/airdrop-folder/move-back', { rel_paths: relPaths });
+  }
+
+  /** Opens one AirDrop window with these files (empty = the whole AIRDROP folder). */
+  sendAirDrop(relPaths: string[]): Observable<number> {
+    return this.postData<{ files: number }>('/api/camera/airdrop-folder/send', { rel_paths: relPaths }).pipe(map((r) => r.files));
+  }
+
+  private postData<T>(path: string, body: unknown): Observable<T> {
+    return this.http.post<ApiWrapper<T>>(`${environment.apiUrl}${path}`, body, { headers: this.authHeaders() }).pipe(
+      map((res) => {
+        if (res.data === undefined) throw new Error(res.message || 'Something went wrong');
+        return res.data;
+      }),
+      catchError((err) => throwError(() => this.toError(err))),
+    );
+  }
+
+  /** Puts the "Sent" tag on loaded tiles after an AirDrop finished. */
+  markSent(relPaths: string[]): void {
+    if (!relPaths.length) return;
+    const set = new Set(relPaths);
+    this.items.update((list) => list.map((it) => (set.has(it.rel_path) ? { ...it, sent: true } : it)));
+  }
+
   markCopied(names: string[]): void {
     if (!names.length) return;
     const set = new Set(names);
@@ -315,7 +374,8 @@ export class CameraService {
     let params = new HttpParams()
       .set('limit', String(limit))
       .set('offset', String(offset))
-      .set('sort', sort);
+      .set('sort', sort)
+      .set('folder', this.folder());
     if (kind !== 'all') params = params.set('kind', kind);
     return this.http.get<ApiWrapper<CameraItemsPage>>(`${environment.apiUrl}/api/camera/items`, {
       headers: this.authHeaders(),

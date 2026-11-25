@@ -95,6 +95,8 @@ func main() {
 	copyJobs := service.NewCopyJobStore()
 	cameraCopyHandler := handler.NewCameraCopyHandler(dumpHandler, folderRepo, cameraCopyRepo, copyJobs)
 	cameraHandler := handler.NewCameraHandler(settingsRepo, cameraCopyRepo, cameraIndexRepo, cameraScanner, mediaSigner, cfg.DownloadDir)
+	cameraHandler.SetAirDropTray(repository.NewAirDropTrayRepo(db))
+	cameraHandler.SetCameraTrash(repository.NewCameraTrashRepo(db))
 
 	var srv *http.Server
 	var restartAfter atomic.Bool
@@ -118,6 +120,8 @@ func main() {
 	r.Get("/media/split/{uid}/{projectId}/*", splitHandler.Media)
 	r.Get("/media/camera/{uid}/*", cameraHandler.Media)
 	r.Get("/media/camera-thumb/{uid}/*", cameraHandler.Thumb)
+	r.Get("/media/card-trash-thumb/{uid}/{id}", cameraHandler.CardTrashThumb)
+	r.Get("/media/card-trash/{uid}/{id}", cameraHandler.CardTrashMedia)
 	r.With(httprate.LimitByIP(60, time.Minute)).Post("/auth/local", authHandler.Local)
 
 	r.Route("/api", func(r chi.Router) {
@@ -140,6 +144,12 @@ func main() {
 			r.Post("/camera/delete", cameraHandler.Delete)
 			r.Post("/camera/airdrop", cameraHandler.AirDrop)
 			r.Post("/camera/eject", cameraHandler.Eject)
+			r.Post("/camera/airdrop-folder/add", cameraHandler.AddToAirDrop)
+			r.Post("/camera/airdrop-folder/move-back", cameraHandler.MoveBackFromAirDrop)
+			r.Post("/camera/airdrop-folder/send", cameraHandler.SendAirDrop)
+			r.Get("/camera/trash", cameraHandler.CardTrash)
+			r.Post("/camera/trash/{id}/restore", cameraHandler.RestoreCardTrash)
+			r.Delete("/camera/trash/{id}", cameraHandler.DeleteCardTrash)
 			r.Post("/camera/copy", cameraCopyHandler.Start)
 			r.Get("/camera/copy-jobs/{id}", cameraCopyHandler.Job)
 			r.Delete("/camera/root", cameraHandler.ClearRoot)

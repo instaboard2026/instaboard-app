@@ -77,10 +77,31 @@
           (click)="onNavLinkClick()"
           routerLink="/camera"
           routerLinkActive="!bg-nav-active !text-white"
+          [routerLinkActiveOptions]="{ exact: true }"
           class="flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover">
           <span class="material-icons-outlined !text-xl shrink-0">photo_camera</span>
           <span class="flex-1">Manage camera</span>
         </a>
+
+        @if (cardIn()) {
+          <!-- AirDrop: the card's AIRDROP folder. Only while the card is in; drop camera tiles here to move them in. -->
+          <a
+            routerLink="/camera/airdrop"
+            (click)="onNavLinkClick()"
+            data-drop-airdrop="folder"
+            class="ml-4 flex h-[30px] items-center gap-2 rounded-xl px-2 text-sm font-[450] text-nav-text transition-colors hover:bg-nav-hover"
+            [class.!bg-nav-active]="isActiveAirDrop()"
+            [class.!text-white]="isActiveAirDrop()"
+            [class.drop-target-active]="cameraDrag.isHovered('airdrop')">
+            <span class="material-icons-outlined !text-xl shrink-0 text-sky-400">wifi_tethering</span>
+            <span class="flex-1">AirDrop</span>
+            @if (airdropSending()) {
+              <span class="text-[11px] text-sky-300">Sending…</span>
+            } @else if (airdropCount() > 0) {
+              <span class="text-xs text-nav-muted">{{ airdropCount() }}</span>
+            }
+          </a>
+        }
 
         @if (isLoggedIn()) {
           <div cdkDropListGroup class="flex flex-col pt-2">
@@ -299,8 +320,8 @@
         (click)="openBin()"
         aria-label="Open Bin — drop a reel here to move it to the Bin"
         class="bin-row mx-2 mb-1 flex h-24 shrink-0 items-center justify-center rounded-xl transition-colors"
-        [class.drop-target-bin-active]="cardDrag.isHovered('bin')"
-        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin')">
+        [class.drop-target-bin-active]="cardDrag.isHovered('bin') || cameraDrag.isHovered('bin')"
+        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin') && !cameraDrag.isHovered('bin')">
         <img src="/icons/bin.png" alt="" width="84" height="96" class="bin-photo select-none" draggable="false" />
       </button>
     }
@@ -376,11 +397,28 @@
       <a
         routerLink="/camera"
         routerLinkActive="!bg-nav-active !text-white"
+        [routerLinkActiveOptions]="{ exact: true }"
         [appTooltip]="'Manage camera'"
         aria-label="Manage camera"
         class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-nav-text transition-colors hover:bg-nav-hover">
         <span class="material-icons-outlined !text-xl">photo_camera</span>
       </a>
+
+      @if (cardIn()) {
+        <a
+          routerLink="/camera/airdrop"
+          data-drop-airdrop="folder"
+          [appTooltip]="'AirDrop'"
+          aria-label="AirDrop"
+          class="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sky-400 transition-colors hover:bg-nav-hover"
+          [class.!bg-nav-active]="isActiveAirDrop()"
+          [class.drop-target-active]="cameraDrag.isHovered('airdrop')">
+          <span class="material-icons-outlined !text-xl">wifi_tethering</span>
+          @if (airdropCount() > 0) {
+            <span class="absolute right-0.5 top-0.5 min-w-[16px] h-4 rounded-full bg-sky-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">{{ airdropCount() }}</span>
+          }
+        </a>
+      }
 
       @if (isLoggedIn()) {
         @for (group of groups(); track group.section?.id ?? 0) {
@@ -420,8 +458,8 @@
         [appTooltip]="'Bin'"
         aria-label="Open Bin — drop a reel here to move it to the Bin"
         class="bin-row mb-1 inline-flex h-20 w-20 shrink-0 items-center justify-center self-center rounded-xl transition-colors"
-        [class.drop-target-bin-active]="cardDrag.isHovered('bin')"
-        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin')">
+        [class.drop-target-bin-active]="cardDrag.isHovered('bin') || cameraDrag.isHovered('bin')"
+        [class.bg-nav-hover]="isActiveBin() && !cardDrag.isHovered('bin') && !cameraDrag.isHovered('bin')">
         <img src="/icons/bin.png" alt="" width="72" height="80" class="bin-photo select-none" draggable="false" />
       </button>
     }

@@ -4,7 +4,7 @@
  * between sections), and a Bin. Home, folder rows, and the Bin
  * are drop targets for cards (see CardDragService); dropping on Bin soft-deletes. Click Bin to open it.
  */
-import { Component, ChangeDetectionStrategy, HostListener, input, output, inject, effect, signal, untracked } from '@angular/core';
+import { Component, ChangeDetectionStrategy, HostListener, input, output, inject, effect, signal, untracked, computed } from '@angular/core';
 import { CommonModule, NgTemplateOutlet } from '@angular/common';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -16,6 +16,7 @@ import { DumpService } from '../../../services/dump.service';
 import { Folder, FolderGroup, FolderSection, FoldersService } from '../../../services/folders.service';
 import { CardDragService } from '../../../services/card-drag.service';
 import { CameraDragService } from '../../../services/camera-drag.service';
+import { CameraService } from '../../../services/camera.service';
 import { ConfirmDialogService } from '../../../services/confirm-dialog.service';
 import { AutofocusSelectDirective } from '../../directives/autofocus-select.directive';
 import { TooltipDirective } from '../../directives/tooltip.directive';
@@ -36,6 +37,13 @@ export class SidebarComponent {
   readonly foldersService = inject(FoldersService);
   readonly cardDrag = inject(CardDragService);
   readonly cameraDrag = inject(CameraDragService);
+  private camera = inject(CameraService);
+
+  /** Card plugged in: the AirDrop row shows under Manage camera. */
+  readonly cardIn = computed(() => !!this.camera.status()?.available);
+  /** Files in the card's AIRDROP folder, and whether its AirDrop window is open. */
+  readonly airdropCount = computed(() => this.camera.status()?.airdrop_count ?? 0);
+  readonly airdropSending = computed(() => !!this.camera.status()?.airdrop_sending);
 
   readonly folders = this.foldersService.folders;
   readonly renamingId = this.foldersService.renamingId;
@@ -77,8 +85,13 @@ export class SidebarComponent {
         if (!this.foldersService.loaded()) {
           this.foldersService.load();
         }
+        this.camera.watch();
       });
     });
+  }
+
+  isActiveAirDrop(): boolean {
+    return this.currentPath() === '/camera/airdrop';
   }
 
   @HostListener('document:click')

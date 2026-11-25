@@ -79,24 +79,24 @@ func (r *CameraIndexRepo) CountAll(ctx context.Context, userID int64) (int, erro
 }
 
 // Count returns indexed media file count (image + video, excludes junk).
-func (r *CameraIndexRepo) Count(ctx context.Context, userID int64) (int, error) {
+func (r *CameraIndexRepo) Count(ctx context.Context, userID int64, scope string) (int, error) {
 	var n int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tbl_camera_index WHERE user_id = ? AND kind IN ('image', 'video')`, userID,
+		`SELECT COUNT(*) FROM tbl_camera_index WHERE user_id = ? AND kind IN ('image', 'video')`+ScopeSQL(scope), userID,
 	).Scan(&n)
 	return n, err
 }
 
 // CountByKind returns total for a filter (all = image+video / image / video / junk).
-func (r *CameraIndexRepo) CountByKind(ctx context.Context, userID int64, kind string) (int, error) {
+func (r *CameraIndexRepo) CountByKind(ctx context.Context, userID int64, kind, scope string) (int, error) {
 	if kind == "image" || kind == "video" || kind == "junk" {
 		var n int
 		err := r.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM tbl_camera_index WHERE user_id = ? AND kind = ?`, userID, kind,
+			`SELECT COUNT(*) FROM tbl_camera_index WHERE user_id = ? AND kind = ?`+ScopeSQL(scope), userID, kind,
 		).Scan(&n)
 		return n, err
 	}
-	return r.Count(ctx, userID)
+	return r.Count(ctx, userID, scope)
 }
 
 // CameraSortLatest / CameraSortOldest control ListOffset ordering by mtime_ns.
@@ -120,7 +120,7 @@ func cameraMtimeOrderSQL(sort string) string {
 }
 
 // ListOffset returns a page by offset/limit, ordered by mtime (latest or oldest).
-func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind string, offset, limit int, sort string) ([]CameraIndexRow, error) {
+func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind string, offset, limit int, sort, scope string) ([]CameraIndexRow, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 24
 	}
@@ -133,13 +133,13 @@ func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind str
 	if kind == "image" || kind == "video" || kind == "junk" {
 		rows, err = r.db.QueryContext(ctx,
 			`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-			 WHERE user_id = ? AND kind = ? ORDER BY `+order+` LIMIT ? OFFSET ?`,
+			 WHERE user_id = ? AND kind = ?`+ScopeSQL(scope)+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
 			userID, kind, limit, offset,
 		)
 	} else {
 		rows, err = r.db.QueryContext(ctx,
 			`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-			 WHERE user_id = ? AND kind IN ('image', 'video') ORDER BY `+order+` LIMIT ? OFFSET ?`,
+			 WHERE user_id = ? AND kind IN ('image', 'video')`+ScopeSQL(scope)+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
 			userID, limit, offset,
 		)
 	}
@@ -151,7 +151,7 @@ func (r *CameraIndexRepo) ListOffset(ctx context.Context, userID int64, kind str
 }
 
 // ListPage returns items after cursor (exclusive), ordered by rel_path.
-func (r *CameraIndexRepo) ListPage(ctx context.Context, userID int64, kind, cursor string, limit int) ([]CameraIndexRow, error) {
+func (r *CameraIndexRepo) ListPage(ctx context.Context, userID int64, kind, cursor string, limit int, scope string) ([]CameraIndexRow, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
@@ -161,13 +161,13 @@ func (r *CameraIndexRepo) ListPage(ctx context.Context, userID int64, kind, curs
 		if cursor == "" {
 			rows, err = r.db.QueryContext(ctx,
 				`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-				 WHERE user_id = ? AND kind = ? ORDER BY rel_path LIMIT ?`,
+				 WHERE user_id = ? AND kind = ?`+ScopeSQL(scope)+` ORDER BY rel_path LIMIT ?`,
 				userID, kind, limit,
 			)
 		} else {
 			rows, err = r.db.QueryContext(ctx,
 				`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-				 WHERE user_id = ? AND kind = ? AND rel_path > ? ORDER BY rel_path LIMIT ?`,
+				 WHERE user_id = ? AND kind = ? AND rel_path > ?`+ScopeSQL(scope)+` ORDER BY rel_path LIMIT ?`,
 				userID, kind, cursor, limit,
 			)
 		}
@@ -175,13 +175,13 @@ func (r *CameraIndexRepo) ListPage(ctx context.Context, userID int64, kind, curs
 		if cursor == "" {
 			rows, err = r.db.QueryContext(ctx,
 				`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-				 WHERE user_id = ? AND kind IN ('image', 'video') ORDER BY rel_path LIMIT ?`,
+				 WHERE user_id = ? AND kind IN ('image', 'video')`+ScopeSQL(scope)+` ORDER BY rel_path LIMIT ?`,
 				userID, limit,
 			)
 		} else {
 			rows, err = r.db.QueryContext(ctx,
 				`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index
-				 WHERE user_id = ? AND kind IN ('image', 'video') AND rel_path > ? ORDER BY rel_path LIMIT ?`,
+				 WHERE user_id = ? AND kind IN ('image', 'video') AND rel_path > ?`+ScopeSQL(scope)+` ORDER BY rel_path LIMIT ?`,
 				userID, cursor, limit,
 			)
 		}
@@ -206,14 +206,14 @@ func scanIndexRows(rows *sql.Rows) ([]CameraIndexRow, error) {
 }
 
 // KindCounts returns totals for filter badges (all = image+video).
-func (r *CameraIndexRepo) KindCounts(ctx context.Context, userID int64) (all, video, image, junk int, err error) {
+func (r *CameraIndexRepo) KindCounts(ctx context.Context, userID int64, scope string) (all, video, image, junk int, err error) {
 	err = r.db.QueryRowContext(ctx,
 		`SELECT
 		   COALESCE(SUM(CASE WHEN kind IN ('image', 'video') THEN 1 ELSE 0 END), 0),
 		   COALESCE(SUM(CASE WHEN kind = 'video' THEN 1 ELSE 0 END), 0),
 		   COALESCE(SUM(CASE WHEN kind = 'image' THEN 1 ELSE 0 END), 0),
 		   COALESCE(SUM(CASE WHEN kind = 'junk' THEN 1 ELSE 0 END), 0)
-		 FROM tbl_camera_index WHERE user_id = ?`, userID,
+		 FROM tbl_camera_index WHERE user_id = ?`+ScopeSQL(scope), userID,
 	).Scan(&all, &video, &image, &junk)
 	return
 }
@@ -299,4 +299,40 @@ func (r *CameraIndexRepo) SetScanMeta(ctx context.Context, userID int64, m Camer
 		userID, m.Status, m.IndexedCount, trunc, timed, errMsg,
 	)
 	return err
+}
+
+// GetByRelPaths returns indexed rows for the given rel paths (missing ones are skipped).
+func (r *CameraIndexRepo) GetByRelPaths(ctx context.Context, userID int64, relPaths []string) ([]CameraIndexRow, error) {
+	out := []CameraIndexRow{}
+	for _, p := range relPaths {
+		var c CameraIndexRow
+		err := r.db.QueryRowContext(ctx,
+			`SELECT rel_path, name, kind, byte_size, mtime_ns FROM tbl_camera_index WHERE user_id = ? AND rel_path = ?`,
+			userID, p).Scan(&c.RelPath, &c.Name, &c.Kind, &c.ByteSize, &c.MtimeNs)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// AirDropFolder is the folder at the top of the card that holds files waiting to be AirDropped.
+const AirDropFolder = "AIRDROP"
+
+// Index scopes: the main camera grid (everything but AIRDROP) or the AIRDROP folder only.
+const (
+	ScopeMain    = "main"
+	ScopeAirDrop = "airdrop"
+)
+
+// ScopeSQL is the extra WHERE condition for a scope.
+func ScopeSQL(scope string) string {
+	if scope == ScopeAirDrop {
+		return ` AND rel_path LIKE '` + AirDropFolder + `/%'`
+	}
+	return ` AND rel_path NOT LIKE '` + AirDropFolder + `/%'`
 }

@@ -1,10 +1,16 @@
-<div class="relative w-full max-w-screen-2xl mx-auto px-4 sm:px-6 py-6 text-ink dark:text-slate-100">
-  <div class="mb-5 flex flex-col gap-3">
+<div class="relative w-full max-w-screen-2xl mx-auto px-4 sm:px-6 pb-6 text-ink dark:text-slate-100">
+  <!-- Sticky header: title, selection actions, card buttons, filters and paging stay in view. -->
+  <div class="sticky top-0 z-30 -mx-4 mb-5 flex flex-col gap-3 bg-white px-4 pb-3 pt-6 sm:-mx-6 sm:px-6 dark:bg-primary-bg">
     <div class="flex min-w-0 items-center gap-3">
       <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 class="flex min-w-0 items-center gap-2 text-xl font-semibold">
-          <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">photo_camera</span>
-          <span class="truncate">Manage camera</span>
+          @if (isAirDrop) {
+            <span class="material-icons-outlined !text-[22px] text-sky-400">wifi_tethering</span>
+            <span class="truncate">AirDrop</span>
+          } @else {
+            <span class="material-icons-outlined !text-[22px] text-ink-secondary dark:text-slate-400">photo_camera</span>
+            <span class="truncate">Manage camera</span>
+          }
         </h1>
         @if (isLoggedIn() && count() > 0 && !needsReconnect()) {
           <span class="shrink-0 text-sm text-ink-secondary dark:text-slate-400">
@@ -26,6 +32,60 @@
       </div>
       <div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
         @if (isLoggedIn()) {
+          @if (selectedCount() > 0) {
+            <span class="hidden text-sm text-ink-secondary sm:inline dark:text-slate-400">
+              {{ selectedCount() }} selected
+              @if (selectedBytesLabel(); as size) {
+                · {{ size }}
+              }
+            </span>
+            <button type="button" (click)="clearSelection()" title="Clear selection (Esc)" aria-label="Clear selection"
+              class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-secondary hover:bg-[#f1f1f1] dark:text-slate-400 dark:hover:bg-slate-800">
+              <span class="material-icons-outlined !text-lg">close</span>
+            </button>
+          }
+          @if (isAirDrop && total() > 0 && !needsReconnect()) {
+            <button
+              type="button"
+              (click)="sendAirDrop()"
+              [disabled]="airdropSending() || deleting() || loading()"
+              [title]="selectedCount() ? 'AirDrop the selected files' : 'AirDrop every file in this folder'"
+              class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] bg-sky-500 text-sm font-semibold text-white hover:bg-sky-400 disabled:opacity-50">
+              <span class="material-icons-outlined !text-lg">wifi_tethering</span>
+              {{ airdropSending() ? 'Sending…' : selectedCount() ? 'AirDrop ' + selectedCount() : 'AirDrop all' }}
+            </button>
+            <button
+              type="button"
+              (click)="moveBackSelected()"
+              [disabled]="selectedCount() === 0 || deleting() || loading()"
+              [title]="selectedCount() === 0 ? 'Select files to move them back' : 'Move the selected files back to where they were on the card'"
+              class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
+              <span class="material-icons-outlined !text-lg">undo</span>
+              Move back
+            </button>
+          }
+          @if (total() > 0 && !needsReconnect()) {
+            @if (!isAirDrop) {
+            <button
+              type="button"
+              (click)="shareSelected()"
+              [disabled]="selectedCount() === 0 || sharing() || deleting() || loading() || scanning()"
+              [title]="selectedCount() === 0 ? 'Select files to AirDrop them' : 'AirDrop selected files'"
+              class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
+              <span class="material-icons-outlined !text-lg">ios_share</span>
+              {{ sharing() ? 'Sharing…' : 'Share' }}
+            </button>
+            }
+            <button
+              type="button"
+              (click)="deleteSelected()"
+              [disabled]="selectedCount() === 0 || deleting() || sharing() || loading() || scanning()"
+              [title]="selectedCount() === 0 ? 'Select files to delete them' : 'Delete selected files from the card'"
+              class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
+              <span class="material-icons-outlined !text-lg">delete</span>
+              Delete
+            </button>
+          }
           @if ((total() > 0 || scanning()) && !needsReconnect()) {
             <button
               type="button"
@@ -48,6 +108,7 @@
               {{ ejecting() ? 'Ejecting…' : 'Safely eject' }}
             </button>
           }
+          @if (!isAirDrop || needsReconnect()) {
           <button
             type="button"
             (click)="openFolder()"
@@ -56,6 +117,7 @@
             <span class="material-icons-outlined !text-lg">folder_open</span>
             {{ needsReconnect() ? 'Reconnect card' : (total() > 0 || scanning() ? 'Change folder' : 'Open SD card folder') }}
           </button>
+          }
         }
       </div>
     </div>
@@ -102,6 +164,15 @@
       @for (i of [1, 2, 3, 4, 5, 6]; track i) {
         <div class="w-full aspect-[9/16] rounded-2xl bg-[#f1f1f1] dark:bg-slate-800 animate-pulse"></div>
       }
+    </div>
+  } @else if (isAirDrop && total() === 0 && !scanning()) {
+    <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
+      <span class="material-icons-outlined !text-4xl text-sky-400">wifi_tethering</span>
+      <p class="mt-3 text-sm font-medium">Nothing in AirDrop yet</p>
+      <p class="mt-1 max-w-sm text-xs text-ink-secondary dark:text-slate-400">
+        On Manage camera, drag files onto AirDrop in the sidebar. They move into the AIRDROP folder on the card, ready to send together.
+      </p>
+      <a routerLink="/camera" class="mt-4 h-8 px-3 inline-flex items-center rounded-[10px] bg-[#303030] text-sm font-semibold text-white dark:bg-white dark:text-ink">Go to Manage camera</a>
     </div>
   } @else if (total() === 0 && !scanning()) {
     <div class="flex min-h-[280px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#d0d0d0] bg-white/60 px-6 text-center dark:border-slate-700 dark:bg-card-bg/40">
@@ -225,59 +296,14 @@
       </div>
     </div>
 
-    <div class="mb-4 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        (click)="toggleSelectMode()"
-        [attr.aria-pressed]="selectMode()"
-        class="inline-flex h-8 items-center gap-1 rounded-[10px] border px-2.5 text-sm font-medium transition-colors"
-        [class.border-blue-500]="selectMode()"
-        [class.bg-blue-50]="selectMode()"
-        [class.text-blue-700]="selectMode()"
-        [class.dark:border-blue-400]="selectMode()"
-        [class.dark:bg-blue-950/40]="selectMode()"
-        [class.dark:text-blue-300]="selectMode()"
-        [class.border-[#d0d0d0]]="!selectMode()"
-        [class.bg-white]="!selectMode()"
-        [class.text-ink]="!selectMode()"
-        [class.dark:border-slate-600]="!selectMode()"
-        [class.dark:bg-slate-800]="!selectMode()"
-        [class.dark:text-slate-200]="!selectMode()">
-        <span class="material-icons-outlined !text-lg">{{ selectMode() ? 'check_circle' : 'select_all' }}</span>
-        {{ selectMode() ? 'Selecting' : 'Select' }}
-      </button>
-      @if (selectMode()) {
-        <span class="text-sm text-ink-secondary dark:text-slate-400">
-          {{ selectedCount() }} selected
-          @if (selectedBytesLabel(); as size) {
-            · {{ size }}
-          }
-        </span>
-        <button type="button" (click)="selectAll()" class="text-sm font-medium text-blue-600 dark:text-blue-400">Select all</button>
-        @if (selectedCount() > 0) {
-          <button type="button" (click)="clearSelection()" class="text-sm text-ink-secondary dark:text-slate-400">Clear</button>
-        }
+    <p class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-secondary dark:text-slate-400">
+      @if (isAirDrop) {
+        <span>Files in the card's AIRDROP folder · select some or AirDrop all · drag to the Bin or Delete when done</span>
       } @else {
-        <span class="text-sm text-ink-secondary dark:text-slate-400">Click a tile to preview · drag tiles onto a folder in the sidebar to copy them in</span>
+        <span>Click to select · ⌘-click to add · Shift-click for a range · ▶ to play · drag onto a folder, AirDrop or the Bin</span>
       }
-      <button
-        type="button"
-        (click)="shareSelected()"
-        [disabled]="selectedCount() === 0 || sharing() || deleting() || loading() || scanning()"
-        title="AirDrop selected files"
-        class="ml-auto h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-ink dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 disabled:opacity-40">
-        <span class="material-icons-outlined !text-lg">ios_share</span>
-        {{ sharing() ? 'Sharing…' : 'Share' }}
-      </button>
-      <button
-        type="button"
-        (click)="deleteSelected()"
-        [disabled]="selectedCount() === 0 || deleting() || sharing() || loading() || scanning()"
-        class="h-8 shrink-0 px-3 inline-flex items-center gap-1 rounded-[10px] border border-[#d0d0d0] bg-white text-sm font-medium text-red-600 dark:border-slate-600 dark:bg-slate-800 dark:text-red-400 disabled:opacity-40">
-        <span class="material-icons-outlined !text-lg">delete</span>
-        Delete
-      </button>
-    </div>
+      <button type="button" (click)="selectAll()" class="font-medium text-blue-600 dark:text-blue-400">Select all</button>
+    </p>
 
     @if (items().length === 0 && scanning()) {
       <div class="grid gap-4" [class]="gridClass" [style.--per-row]="perRow()">
@@ -309,6 +335,7 @@
             (cdkDragMoved)="onTileDragMoved($event)"
             (cdkDragEnded)="onTileDragEnded($event)"
             (click)="onTileClick(item, $event)"
+            (dblclick)="playTile(item, $event)"
             [attr.title]="item.rel_path"
             class="group relative w-full aspect-[9/16] overflow-hidden rounded-2xl bg-[#1a1a1a] text-left outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500"
             [class.ring-2]="isSelected(item.rel_path) || item.copied"
@@ -337,8 +364,16 @@
               @if (durationLabel(item); as dur) {
                 <span class="pointer-events-none absolute right-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white">{{ dur }}</span>
               }
-              <span class="pointer-events-none absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white">
-                <span class="material-icons-outlined !text-[18px]">play_arrow</span>
+              <span
+                role="button"
+                tabindex="0"
+                title="Play"
+                aria-label="Play"
+                (click)="playTile(item, $event)"
+                (keydown.enter)="playTile(item, $event)"
+                (mousedown)="$event.stopPropagation()"
+                class="absolute bottom-2 right-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white transition hover:scale-110 hover:bg-black/80">
+                <span class="material-icons-outlined !text-[20px]">play_arrow</span>
               </span>
             } @else {
               <img
@@ -346,11 +381,30 @@
                 [alt]="item.name"
                 class="h-full w-full object-cover"
                 (error)="onThumbError(item.rel_path)" />
+              <span
+                role="button"
+                tabindex="0"
+                title="Open"
+                aria-label="Open"
+                (click)="playTile(item, $event)"
+                (keydown.enter)="playTile(item, $event)"
+                (mousedown)="$event.stopPropagation()"
+                class="absolute bottom-2 right-2 inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover:opacity-100 hover:scale-110 hover:bg-black/80">
+                <span class="material-icons-outlined !text-[18px]">open_in_full</span>
+              </span>
             }
-            @if (item.copied) {
-              <span class="absolute left-2 top-2 rounded-md bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">Copied</span>
+            <!-- Tags, top-left: Copied · Sent -->
+            @if (item.copied || item.sent) {
+              <span class="pointer-events-none absolute left-2 top-2 flex flex-wrap items-center gap-1">
+                @if (item.copied) {
+                  <span class="rounded-md bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">Copied</span>
+                }
+                @if (item.sent) {
+                  <span title="Already AirDropped" class="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white/80">Sent</span>
+                }
+              </span>
             }
-            <span class="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pb-2 pt-6 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent py-2 pl-2 pr-12 pt-6 text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
               {{ item.name }}
             </span>
             <ng-container *cdkDragPreview>
@@ -364,7 +418,7 @@
                 }
                 <span class="min-w-0">
                   <span class="block font-semibold">{{ dragChipLabel() }}</span>
-                  <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Drop on a folder or Home</span>
+                  <span class="block truncate text-xs text-slate-500 dark:text-slate-400">Folder copies · AirDrop queues · Bin trashes</span>
                 </span>
               </div>
             </ng-container>

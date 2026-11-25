@@ -15,6 +15,8 @@ import { FormsModule } from '@angular/forms';
 import { DownloadStats, DumpService, MoveTarget, Save, SaveScope, SaveSource } from '../../services/dump.service';
 import { FoldersService } from '../../services/folders.service';
 import { CardDragService, isCalendarDrop, isSplitDrop } from '../../services/card-drag.service';
+import { CardTrashService } from '../../services/card-trash.service';
+import { CardTrashSectionComponent } from '../../shared/components/card-trash-section/card-trash-section.component';
 import { CalendarScheduleService } from '../../services/calendar-schedule.service';
 import { PlaybackService } from '../../services/playback.service';
 import { ConfirmDialogService } from '../../services/confirm-dialog.service';
@@ -60,7 +62,7 @@ const IMAGE_FILE_RE = /\.(png|jpe?g|webp|gif)$/i;
 @Component({
   selector: 'app-dump-page',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, MediaCarouselComponent, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder, AutofocusSelectDirective],
+  imports: [FormsModule, NgTemplateOutlet, MediaCarouselComponent, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder, AutofocusSelectDirective, CardTrashSectionComponent],
   templateUrl: './dump-page.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -110,6 +112,7 @@ export class DumpPageComponent {
     { initialValue: null }
   );
   readonly isBin = computed(() => this.currentPath() === '/bin');
+  readonly cardTrash = inject(CardTrashService);
   readonly scope = computed<SaveScope>(() => (this.isBin() ? 'bin' : (this.folderId() ?? 'dump')));
   readonly folder = computed(() => {
     const id = this.folderId();

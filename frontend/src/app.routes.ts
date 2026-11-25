@@ -28,6 +28,14 @@ export const AppRoutes: Routes = [
       .then(c => c.CameraPageComponent),
     title: 'Instaboard - Manage camera'
   },
+  {
+    // The card's AIRDROP folder: same page, showing only that folder.
+    path: 'camera/airdrop',
+    loadComponent: () => import('./app/features/adaptive/pages/camera-page/camera-page.component')
+      .then(c => c.CameraPageComponent),
+    data: { folder: 'airdrop' },
+    title: 'Instaboard - AirDrop'
+  },
   { path: 'local-media/:id', redirectTo: 'home' },
   {
     path: 'folders/:id',

@@ -7,8 +7,10 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
-import { Subscription, catchError, firstValueFrom, interval, of, switchMap, takeWhile } from 'rxjs';
+import { Subscription, firstValueFrom, takeWhile } from 'rxjs';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { CdkDrag, CdkDragEnd, CdkDragMove, CdkDragPlaceholder, CdkDragPreview, CdkDropList } from '@angular/cdk/drag-drop';
 import {
   CameraItem,
@@ -55,13 +57,17 @@ const SORT_FILTERS: readonly { id: CameraSortOrder; label: string }[] = [
 @Component({
   selector: 'app-camera-page',
   standalone: true,
-  imports: [LazyThumbDirective, LazyAutoplayVideoDirective, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
+  imports: [RouterLink, LazyThumbDirective, LazyAutoplayVideoDirective, CdkDropList, CdkDrag, CdkDragPreview, CdkDragPlaceholder],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './camera-page.component.html',
 })
 export class CameraPageComponent implements OnDestroy {
   private camera = inject(CameraService);
   private cameraCopy = inject(CameraCopyService);
+  private route = inject(ActivatedRoute);
+  /** This page is the card's AIRDROP folder (route /camera/airdrop) instead of the whole card. */
+  readonly isAirDrop = this.route.snapshot.data['folder'] === 'airdrop';
+  readonly airdropSending = computed(() => !!this.status()?.airdrop_sending);
   private foldersService = inject(FoldersService);
   private user = inject(UserContextService);
   private cacheService = inject(CacheService);
@@ -88,13 +94,11 @@ export class CameraPageComponent implements OnDestroy {
   readonly total = this.camera.total;
   readonly isLoggedIn = computed(() => this.user.isLoggedIn());
 
-  readonly selectMode = signal(false);
   readonly selected = signal<Set<string>>(new Set());
   readonly lastClicked = signal<string | null>(null);
   readonly notice = signal<string | null>(null);
   readonly opening = signal(false);
   readonly ejecting = signal(false);
-  private cardWatch: Subscription | null = null;
   readonly canEject = computed(() => !!this.status()?.ejectable);
   readonly deleting = signal(false);
   readonly sharing = signal(false);
@@ -167,6 +171,10 @@ export class CameraPageComponent implements OnDestroy {
   private scanSub: Subscription | null = null;
 
   constructor() {
+    // Show only the AIRDROP folder (or everything else) — reset the grid so the other view never flashes.
+    this.camera.folder.set(this.isAirDrop ? 'airdrop' : 'main');
+    this.camera.items.set([]);
+    this.camera.total.set(0);
     const saved = this.cacheService.getItem<number>(PER_ROW_KEY);
     if (saved !== null && (PER_ROW_OPTIONS as readonly number[]).includes(saved)) {
       this.perRow.set(saved as PerRow);
@@ -188,7 +196,7 @@ export class CameraPageComponent implements OnDestroy {
     if (this.user.isLoggedIn()) {
       this.camera.loadStatus().subscribe({
         next: (s) => {
-          this.watchCard();
+          this.camera.watch();
           if (s.available) {
             this.reloadPage(0).subscribe({
               next: () => {
@@ -203,31 +211,27 @@ export class CameraPageComponent implements OnDestroy {
     }
   }
 
-  /**
-   * Checks every few seconds whether the card is still there: pulled out → tiles disappear;
-   * plugged back in → its files load again without clicking anything.
-   */
-  private watchCard(): void {
-    this.cardWatch?.unsubscribe();
-    let wasAvailable = !!this.status()?.available;
-    this.cardWatch = interval(4000)
-      .pipe(switchMap(() => this.camera.loadStatus().pipe(catchError(() => of(null)))))
-      .subscribe((s) => {
-        if (!s || !s.has_root) return;
-        if (wasAvailable && !s.available) {
-          this.closePreview();
-          this.selected.set(new Set());
-          this.camera.items.set([]);
-        } else if (!wasAvailable && s.available) {
-          this.notice.set(null);
-          this.reloadPage(0).subscribe({ error: () => {} });
-        }
-        wasAvailable = s.available;
-      });
-  }
+  /** Reacts to the shared card watcher: pulled out → tiles go; plugged back in → files reload. */
+  private lastAvailable: boolean | null = null;
+  private readonly cardEffect = effect(() => {
+    const s = this.status();
+    if (!s?.has_root) return;
+    const available = s.available;
+    untracked(() => {
+      if (this.lastAvailable === true && !available) {
+        this.closePreview();
+        this.selected.set(new Set());
+        this.camera.items.set([]);
+      } else if (this.lastAvailable === false && available) {
+        this.notice.set(null);
+        this.reloadPage(0).subscribe({ error: () => {} });
+      }
+      this.lastAvailable = available;
+    });
+  });
 
   ngOnDestroy(): void {
-    this.cardWatch?.unsubscribe();
+    if (this.isAirDrop) this.camera.folder.set('main');
     this.scanSub?.unsubscribe();
     this.playback.previewPause.set(false);
   }
@@ -344,15 +348,6 @@ export class CameraPageComponent implements OnDestroy {
     return this.selected().has(rel);
   }
 
-  toggleSelectMode(): void {
-    const next = !this.selectMode();
-    this.selectMode.set(next);
-    if (!next) {
-      this.selected.set(new Set());
-      this.lastClicked.set(null);
-    }
-  }
-
   openPreview(item: CameraItem, event?: Event): void {
     event?.stopPropagation();
     event?.preventDefault();
@@ -369,13 +364,23 @@ export class CameraPageComponent implements OnDestroy {
   @HostListener('document:keydown.escape')
   onEscape(): void {
     if (this.preview()) this.closePreview();
+    else this.clearSelection();
   }
 
+  /** ▶ (or double-click): play / open the file and make it the selection. */
+  playTile(item: CameraItem, event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    if (item.kind === 'junk') return;
+    const multi = event instanceof MouseEvent && (event.metaKey || event.ctrlKey);
+    if (multi) this.selected.update((s) => new Set(s).add(item.rel_path));
+    else this.selected.set(new Set([item.rel_path]));
+    this.lastClicked.set(item.rel_path);
+    this.openPreview(item);
+  }
+
+  /** Click selects one tile, ⌘/Ctrl-click adds or removes, Shift-click selects a range. */
   onTileClick(item: CameraItem, event: MouseEvent): void {
-    if (!this.selectMode()) {
-      this.openPreview(item, event);
-      return;
-    }
     const list = this.items();
     const next = new Set(this.selected());
     if (event.shiftKey && this.lastClicked()) {
@@ -400,12 +405,12 @@ export class CameraPageComponent implements OnDestroy {
   }
 
   selectAll(): void {
-    if (!this.selectMode()) this.selectMode.set(true);
     this.selected.set(new Set(this.items().map((i) => i.rel_path)));
   }
 
   clearSelection(): void {
     this.selected.set(new Set());
+    this.lastClicked.set(null);
   }
 
   async shareSelected(): Promise<void> {
@@ -453,17 +458,7 @@ export class CameraPageComponent implements OnDestroy {
         } else {
           this.notice.set(`Deleted ${res.deleted} file${res.deleted === 1 ? '' : 's'}.`);
         }
-        this.camera.loadStatus().subscribe({ next: () => {} });
-        this.reloadPage(this.pageIndex()).subscribe({
-          next: () => {
-            if (this.items().length === 0 && this.pageIndex() > 0) {
-              this.reloadPage(this.pageIndex() - 1).subscribe({
-                error: (err: Error) => this.notice.set(err.message),
-              });
-            }
-          },
-          error: (err: Error) => this.notice.set(err.message),
-        });
+        this.afterCardFilesRemoved();
       },
       error: (err: Error) => {
         this.deleting.set(false);
@@ -502,7 +497,112 @@ export class CameraPageComponent implements OnDestroy {
     this.cameraDrag.clear();
     this.playback.dragPause.set(false);
     this.dragPaths.set([]);
-    if (target != null && paths.length) this.copyToFolder(target, paths);
+    if (target == null || !paths.length) return;
+    if (target === 'bin') this.trashFiles(paths);
+    else if (target === 'airdrop') this.moveIntoAirDrop(paths);
+    else this.copyToFolder(target, paths);
+  }
+
+  /** AirDrop drop: moves the files into the card's AIRDROP folder (instant — same card). */
+  private moveIntoAirDrop(paths: string[]): void {
+    if (this.isAirDrop) return;
+    this.camera.addToAirDrop(paths).subscribe({
+      next: (res) => {
+        this.selected.set(new Set());
+        const files = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
+        const failed = res.failed?.length ?? 0;
+        if (res.moved) this.notice.set(`Moved ${files(res.moved)} to AirDrop${failed ? ` · ${failed} could not be moved` : ''}.`);
+        else if (failed) this.notice.set(`Could not move ${files(failed)} to AirDrop (card may be locked).`);
+        this.afterCardFilesRemoved();
+      },
+      error: (err: Error) => this.notice.set(err.message),
+    });
+  }
+
+  /** AirDrop page: opens one AirDrop window with the selected files, or all of them. */
+  sendAirDrop(): void {
+    const paths = [...this.selected()];
+    this.notice.set(null);
+    this.camera.sendAirDrop(paths).subscribe({
+      next: (n) => {
+        this.notice.set(`AirDrop is open with ${n} file${n === 1 ? '' : 's'} — pick your device.`);
+        this.camera.loadStatus().subscribe({ error: () => {} });
+      },
+      error: (err: Error) => this.notice.set(err.message),
+    });
+  }
+
+  /** AirDrop page: puts the selected files back where they were on the card. */
+  moveBackSelected(): void {
+    const paths = [...this.selected()];
+    if (!paths.length) return;
+    this.camera.moveBackFromAirDrop(paths).subscribe({
+      next: (res) => {
+        this.selected.set(new Set());
+        const failed = res.failed?.length ?? 0;
+        const files = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
+        this.notice.set(
+          failed
+            ? `Moved back ${files(res.moved)}; ${failed} could not be moved (the original spot is taken or unknown).`
+            : `Moved ${files(res.moved)} back to Manage camera.`,
+        );
+        this.afterCardFilesRemoved();
+      },
+      error: (err: Error) => this.notice.set(err.message),
+    });
+  }
+
+  /** When the AirDrop window closes, reload so "Sent" tags show. */
+  private wasSending = false;
+  private readonly sendingEffect = effect(() => {
+    const sending = this.airdropSending();
+    untracked(() => {
+      if (this.wasSending && !sending) {
+        this.notice.set(null);
+        this.reloadPage(this.pageIndex()).subscribe({ error: () => {} });
+      }
+      this.wasSending = sending;
+    });
+  });
+
+
+  /** Bin drop: moves card files to the Mac's Trash (Finder can put them back). */
+  private trashFiles(paths: string[]): void {
+    if (this.deleting()) return;
+    this.deleting.set(true);
+    this.notice.set(null);
+    this.closePreview();
+    this.camera.deleteFiles(paths, true).subscribe({
+      next: (res) => {
+        this.deleting.set(false);
+        this.selected.set(new Set());
+        this.lastClicked.set(null);
+        const failed = res.failed?.length ?? 0;
+        const moved = res.deleted;
+        const files = (n: number) => `${n} file${n === 1 ? '' : 's'}`;
+        if (failed && moved) this.notice.set(`Moved ${files(moved)} to the Trash; ${failed} could not be moved.`);
+        else if (failed) this.notice.set(`Could not move ${files(failed)} to the Trash (card may be locked).`);
+        else this.notice.set(`Moved ${files(moved)} to the Bin. Open the Bin to put ${moved === 1 ? 'it' : 'them'} back or delete for good.`);
+        this.afterCardFilesRemoved();
+      },
+      error: (err: Error) => {
+        this.deleting.set(false);
+        this.notice.set(err.message);
+      },
+    });
+  }
+
+  /** Refresh counts and the current page after files left the card (step back if the page emptied). */
+  private afterCardFilesRemoved(): void {
+    this.camera.loadStatus().subscribe({ next: () => {} });
+    this.reloadPage(this.pageIndex()).subscribe({
+      next: () => {
+        if (this.items().length === 0 && this.pageIndex() > 0) {
+          this.reloadPage(this.pageIndex() - 1).subscribe({ error: (err: Error) => this.notice.set(err.message) });
+        }
+      },
+      error: (err: Error) => this.notice.set(err.message),
+    });
   }
 
   /** Thumbnail already in memory for the drag chip (no extra card reads). */
