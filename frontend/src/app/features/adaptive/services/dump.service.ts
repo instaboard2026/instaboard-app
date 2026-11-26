@@ -264,6 +264,25 @@ export class DumpService {
   }
 
   /** Opens the downloaded file in Finder (macOS) / File Explorer. */
+  /** Opens the Mac's AirDrop window with this card's downloaded files. */
+  airDrop(id: number): Observable<number> {
+    const headers = this.authHeaders();
+    if (!headers) return throwError(() => new Error('Please sign in.'));
+    return this.http.post<ApiWrapper<{ files: number }>>(`${environment.apiUrl}/api/dump/${id}/airdrop`, null, { headers }).pipe(
+      map((res) => {
+        if (res?.status !== 'SUCCESS' || !res.data) throw new Error(res?.message || 'Could not open AirDrop.');
+        return res.data.files;
+      }),
+      catchError((err: unknown) => {
+        const message =
+          err instanceof HttpErrorResponse
+            ? err.error?.message || 'Could not open AirDrop.'
+            : (err as Error)?.message || 'Could not open AirDrop.';
+        return throwError(() => new Error(capitalize(message)));
+      }),
+    );
+  }
+
   reveal(id: number): Observable<{ path: string }> {
     const headers = this.authHeaders();
     if (!headers) {

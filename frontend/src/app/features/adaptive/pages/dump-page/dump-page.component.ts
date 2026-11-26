@@ -468,9 +468,27 @@ export class DumpPageComponent {
     this.detailsSave.set(null);
     this.revealError.set(null);
     this.revealingId.set(null);
+    this.shareError.set(null);
   }
 
   /** Opens the downloaded file in Finder / File Explorer. */
+  /** Details: AirDrop this card's downloaded files. */
+  readonly sharingId = signal<number | null>(null);
+  readonly shareError = signal<string | null>(null);
+
+  airDropSave(save: Save): void {
+    if (!save.download?.files || this.sharingId() === save.id) return;
+    this.sharingId.set(save.id);
+    this.shareError.set(null);
+    this.dumpService.airDrop(save.id).subscribe({
+      next: () => this.sharingId.set(null),
+      error: (err: Error) => {
+        this.sharingId.set(null);
+        this.shareError.set(err.message);
+      },
+    });
+  }
+
   revealInFinder(save: Save): void {
     if (!save.download?.path || this.revealingId() === save.id) return;
     this.revealingId.set(save.id);

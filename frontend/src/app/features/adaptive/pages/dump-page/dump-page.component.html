@@ -426,6 +426,17 @@
           <dt class="text-slate-500 dark:text-slate-400">Source</dt>
           <dd class="flex items-center gap-1.5">
             <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-md border border-[#e3e3e3] dark:border-slate-600 px-1.5 text-[10px] font-semibold tracking-wide text-ink-secondary dark:text-slate-300">{{ badge(save) }}</span>
+            @if (save.download?.files) {
+              <button
+                type="button"
+                (click)="airDropSave(save)"
+                [disabled]="sharingId() === save.id"
+                aria-label="Share with AirDrop"
+                title="Share with AirDrop"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#e3e3e3] dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-50">
+                <span class="material-icons-outlined !text-base">ios_share</span>
+              </button>
+            }
             @if (!isLocal(save)) {
               <a
                 [href]="save.url"
@@ -447,6 +458,9 @@
             }
           </dd>
         </div>
+        @if (shareError() && detailsSave()?.id === save.id) {
+          <p class="-mt-1 text-right text-[11px] text-red-600 dark:text-red-400" role="alert">{{ shareError() }}</p>
+        }
         <div class="flex items-center justify-between gap-3">
           <dt class="text-slate-500 dark:text-slate-400">Added from</dt>
           <dd class="font-medium">{{ addedFrom(save) }}</dd>

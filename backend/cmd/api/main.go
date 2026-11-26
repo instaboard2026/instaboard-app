@@ -161,6 +161,7 @@ func main() {
 			r.Put("/dump/order", dumpHandler.Reorder)
 			r.Post("/dump/{id}/download", dumpHandler.Download)
 			r.Post("/dump/{id}/reveal", dumpHandler.RevealInFinder)
+			r.Post("/dump/{id}/airdrop", dumpHandler.AirDropSave)
 			r.Get("/folders", folderHandler.List)
 			r.Post("/folders", folderHandler.Create)
 			r.Put("/folders/order", folderHandler.Reorder)

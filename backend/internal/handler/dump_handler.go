@@ -472,6 +472,48 @@ func (h *DumpHandler) RevealInFinder(w http.ResponseWriter, r *http.Request) {
 	utils.WriteSuccess(w, map[string]string{"path": path})
 }
 
+// AirDropSave opens the Mac's AirDrop window with a card's downloaded files (all slides of a carousel).
+func (h *DumpHandler) AirDropSave(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == 0 {
+		utils.WriteError(w, http.StatusUnauthorized, "authorization required", nil)
+		return
+	}
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id == 0 {
+		utils.WriteError(w, http.StatusBadRequest, "invalid save id", nil)
+		return
+	}
+	if _, err := h.repo.Get(r.Context(), userID, id); errors.Is(err, repository.ErrSaveNotFound) {
+		utils.WriteError(w, http.StatusNotFound, "save not found", nil)
+		return
+	} else if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, "failed to load save", nil)
+		return
+	}
+	dir, _ := h.downloadDir(r, userID)
+	var paths []string
+	for _, f := range h.downloader.MediaFiles(dir, id) {
+		p := h.downloader.MediaPath(dir, id, f)
+		if fi, err := os.Stat(p); p != "" && err == nil && fi.Mode().IsRegular() {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		utils.WriteError(w, http.StatusNotFound, "download this item first, then share it", nil)
+		return
+	}
+	if err := service.OpenAirDrop(paths); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrAirDropUnavailable) {
+			status = http.StatusFailedDependency
+		}
+		utils.WriteError(w, status, err.Error(), nil)
+		return
+	}
+	utils.WriteSuccess(w, map[string]int{"files": len(paths)})
+}
+
 func revealInFileManager(path string) error {
 	switch runtime.GOOS {
 	case "darwin":
